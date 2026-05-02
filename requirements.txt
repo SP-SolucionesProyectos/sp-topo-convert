@@ -1,9 +1,9 @@
 streamlit
 pandas
-openpyxl
 pyproj
 folium
 streamlit-folium
-st-gsheets-connection
+streamlit-gsheets-connection
 ezdxf
 xlsxwriter
+streamlit-cookies-manager

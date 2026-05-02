@@ -13,7 +13,11 @@ from streamlit_gsheets import GSheetsConnection
 import ezdxf
 import time
 import string
-from streamlit_cookies_manager import EncryptedCookieManager
+try:
+    from streamlit_cookies_manager import EncryptedCookieManager
+except ImportError:
+    st.error("Error: La librería 'streamlit-cookies-manager' no está instalada. Verifica tu archivo requirements.txt")
+    st.stop()
 
 
 # Configuración de pestaña (Debe ser lo primero siempre)
