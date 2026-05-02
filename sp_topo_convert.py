@@ -13,18 +13,7 @@ from streamlit_gsheets import GSheetsConnection
 import ezdxf
 import time
 import string
-import streamlit.components.v1 as components
-components.html(
-    """
-    <script>
-        var meta = document.createElement('meta');
-        meta.name = "google-site-verification";
-        meta.content ="VzF_MLDAQA0_W6Ws1MOpGnuaDKnO1K7PKWj33pxj1Xo";
-        document.getElementsByTagName('head')[0].appendChild(meta);
-    </script>
-    """,
-    height=0,
-)
+
 
 
 # Configuración de pestaña (Debe ser lo primero siempre)
@@ -109,8 +98,10 @@ if 'es_pase_diario' not in st.session_state: st.session_state.es_pase_diario = F
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "CONVERTIDOR"
 if 'consultas' not in st.session_state: st.session_state.consultas = 0
 if 'creditos_consumidos' not in st.session_state: st.session_state.creditos_consumidos = 0
-if 'resultado' not in st.session_state: st.session_state.resultado = None   
+if 'resultado' not in st.session_state: st.session_state.resultado = None
 if 'descargas_kml' not in st.session_state: st.session_state.descargas_kml = 0
+if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
+if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
 
 # Configuración de Límites
 LIMITE_GRATIS_DIARIO = 10
@@ -542,8 +533,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                         
                         # Consumo de crédito y registro
                         st.session_state.consultas += 1
-                        registrar_actividad("Individual", f"{modo}", zona=zona_global)
-                        st.rerun()                 
+                        registrar_actividad("Individual", f"{modo}", zona=zona_global)               
         with c2:
             if st.session_state.resultado:
                 re, rn, lat, lon = st.session_state.resultado
