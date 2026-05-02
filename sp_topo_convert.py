@@ -19,7 +19,7 @@ components.html(
     <script>
         var meta = document.createElement('meta');
         meta.name = "google-site-verification";
-        meta.content = "<meta name="google-site-verification" content="VzF_MLDAQA0_W6Ws1MOpGnuaDKnO1K7PKWj33pxj1Xo" />";
+        meta.content ="VzF_MLDAQA0_W6Ws1MOpGnuaDKnO1K7PKWj33pxj1Xo";
         document.getElementsByTagName('head')[0].appendChild(meta);
     </script>
     """,
