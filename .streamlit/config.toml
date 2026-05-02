@@ -1,0 +1,14 @@
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
+
+[magic]
+displayStatistics = false
+
+[server]
+# Aumenta el tiempo de espera para conexiones externas
+webhookRequestTimeout = 200
+
+[theme]
+# (Opcional) Si quieres asegurar que tus colores carguen rápido
+primaryColor = "#008080"
