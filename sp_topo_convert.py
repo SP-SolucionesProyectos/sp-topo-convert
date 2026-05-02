@@ -380,8 +380,10 @@ with st.sidebar:
     
     st.markdown(f"""
         <div style="text-align: center; margin-top: -10px;">
-            <p style="font-size: 0.85em; color: #facc15; opacity: 0.9;">Innovación digital a tu medida</p>
-        </div>
+        <p style="font-size: 0.9em; color: #facc15; font-weight: bold;">
+            Innovación digital a tu medida
+        </p>
+    </div>
         <hr style="border-color: rgba(250, 204, 21, 0.3); margin: 15px 0;">
     """, unsafe_allow_html=True)
 
@@ -679,7 +681,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
             # --- CONTROL DE ENCABEZADOS ---
             tiene_header = st.checkbox("¿El archivo tiene fila de encabezados? (Nombres de columnas)", value=True)
             
-            if file:
+            if file is not None:
                 try:
                     # Lectura inicial del archivo
                     if file.name.endswith('.csv'):
