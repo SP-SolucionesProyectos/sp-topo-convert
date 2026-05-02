@@ -3,6 +3,6 @@ pandas
 pyproj
 folium
 streamlit-folium
-streamlit-gsheets
+st-gsheets-connection
 ezdxf
 xlsxwriter
