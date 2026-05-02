@@ -91,31 +91,47 @@ def registrar_actividad(tipo, detalle,zona="Desconocida"):
 # =========================================================
 # BLOQUE 3: GESTIÓN DE SESIÓN Y LÓGICA DE TIERS
 # =========================================================
-# Inicialización de variables de estado
-if 'es_pro' not in st.session_state: st.session_state.es_pro = False
-if 'es_admin' not in st.session_state: st.session_state.es_admin = False
-if 'es_pase_diario' not in st.session_state: st.session_state.es_pase_diario = False
-if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "CONVERTIDOR"
-if 'consultas' not in st.session_state: st.session_state.consultas = 0
-if 'creditos_consumidos' not in st.session_state: st.session_state.creditos_consumidos = 0
-if 'resultado' not in st.session_state: st.session_state.resultado = None
-if 'descargas_kml' not in st.session_state: st.session_state.descargas_kml = 0
-if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
-if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
+inicializacion_segura = {
+    'es_pro': False,
+    'es_admin': False,
+    'es_pase_diario': False,
+    'menu_actual': "CONVERTIDOR",
+    'consultas': 0,
+    'creditos_consumidos': 0,
+    'resultado': None,
+    'descargas_kml': 0,
+    'df_temporal': None,
+    'df_para_kml': None,
+    'inicio_sesion_gratis': datetime.now()
+}
 
-# Configuración de Límites
+for clave, valor_defecto in inicializacion_segura.items():
+    if clave not in st.session_state:
+        st.session_state[clave] = valor_defecto
+
+# 3.2 Configuración de Límites y Constantes
 LIMITE_GRATIS_DIARIO = 10
 LIMITE_FILAS_PASE_DIARIO = 500
 LIMITE_KML_PASE_DIARIO = 100
 
-# Reinicio de 24 horas
-if 'inicio_sesion_gratis' not in st.session_state:
-    st.session_state.inicio_sesion_gratis = datetime.now()
+# 3.3 Lógica de Seguridad para len() y Reinicio de 24 horas
+# Verificamos la validez del DataFrame temporal antes de cualquier operación
+def obtener_conteo_seguro(objeto_df):
+    """Retorna el largo del dataframe o 0 si es None/Vacío, evitando errores de len()"""
+    if objeto_df is not None and hasattr(objeto_df, 'index'):
+        return len(objeto_df)
+    return 0
 
-if (datetime.now() - st.session_state.inicio_sesion_gratis) > timedelta(days=1):
+# Reinicio automático de créditos cada 24 horas
+tiempo_transcurrido = datetime.now() - st.session_state.inicio_sesion_gratis
+if tiempo_transcurrido > timedelta(days=1):
     st.session_state.consultas = 0
     st.session_state.inicio_sesion_gratis = datetime.now()
     st.toast("🎁 Tus créditos gratuitos se han renovado.")
+
+# 3.4 Variable de control de bloqueo (Calculada una sola vez)
+puntos_ya_usados = st.session_state.consultas
+puntos_disponibles_hoy = max(0, LIMITE_GRATIS_DIARIO - puntos_ya_usados)
 
 # =========================================================
 # BLOQUE 4: MOTOR DE CÁLCULO Y TRANSFORMACIONES CORE
@@ -593,7 +609,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
 
     # --- TAB 2: PROCESAMIENTO MASIVO (MEJORADO) ---
     with tab2:
-        if 'df_temporal' in st.session_state:
+        if 'df_temporal' in st.session_state and st.session_state.df_temporal is not None:
             st.success(f"✅ Procesamiento completado: {len(st.session_state.df_temporal)} puntos.")
             
             # Vista previa con la columna vacía incluida
