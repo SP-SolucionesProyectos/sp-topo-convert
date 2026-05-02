@@ -507,8 +507,8 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                 st.subheader("Entrada de Datos")
 
                 # Entradas numéricas (Persistentes)
-                e_u = st.number_input("Coordenada ESTE (X):", value=771218.10, format="%.3f")
-                n_u = st.number_input("Coordenada NORTE (Y):", value=8997417.00, format="%.3f")
+                e_u = st.number_input("Coordenada ESTE (X):", value=None, placeholder="Ej: 771218.100", format="%.3f")
+                n_u = st.number_input("Coordenada NORTE (Y):", value=None, placeholder="Ej: 8997417.000", format="%.3f")
                 
                 label_boton = "📍 UBICAR EN MAPA" if "UBICAR" in modo else "🔄 CONVERTIR COORDENADAS"
                 
