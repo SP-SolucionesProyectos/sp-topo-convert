@@ -13,6 +13,18 @@ from streamlit_gsheets import GSheetsConnection
 import ezdxf
 import time
 import string
+import streamlit.components.v1 as components
+components.html(
+    """
+    <script>
+        var meta = document.createElement('meta');
+        meta.name = "google-site-verification";
+        meta.content = "<meta name="google-site-verification" content="VzF_MLDAQA0_W6Ws1MOpGnuaDKnO1K7PKWj33pxj1Xo" />";
+        document.getElementsByTagName('head')[0].appendChild(meta);
+    </script>
+    """,
+    height=0,
+)
 
 
 # Configuración de pestaña (Debe ser lo primero siempre)
