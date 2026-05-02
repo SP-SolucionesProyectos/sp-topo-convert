@@ -7,4 +7,3 @@ streamlit-gsheets-connection
 ezdxf
 xlsxwriter
 streamlit-cookies-manager
-st-gsheets-connection
