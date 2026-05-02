@@ -13,7 +13,7 @@ from streamlit_gsheets import GSheetsConnection
 import ezdxf
 import time
 import string
-
+from streamlit_cookies_manager import EncryptedCookieManager
 
 
 # Configuración de pestaña (Debe ser lo primero siempre)
@@ -91,31 +91,76 @@ def registrar_actividad(tipo, detalle,zona="Desconocida"):
 # =========================================================
 # BLOQUE 3: GESTIÓN DE SESIÓN Y LÓGICA DE TIERS
 # =========================================================
-# Inicialización de variables de estado
-if 'es_pro' not in st.session_state: st.session_state.es_pro = False
-if 'es_admin' not in st.session_state: st.session_state.es_admin = False
-if 'es_pase_diario' not in st.session_state: st.session_state.es_pase_diario = False
+# 3.1 Configuración del Administrador de Cookies
+# Nota: La password debe ser larga y segura para el cifrado
+cookies = EncryptedCookieManager(
+    password=os.environ.get("COOKIE_PASSWORD", "SP_Topo_Secure_Key_2026_JGZ"),
+    prefix="sp_topo/"
+)
+
+if not cookies.ready():
+    st.stop()  # Espera a que las cookies carguen antes de seguir
+
+# 3.2 Sincronización de Cookies con Session State
+# Esta lógica asegura que si existe una cookie, el Session State la tome como prioridad.
+def sincronizar_sesion_con_cookies():
+    # Mapeo de estados persistentes
+    keys_persistentes = {
+        'es_pro': False,
+        'es_admin': False,
+        'es_pase_diario': False,
+        'consultas': 0,
+        'codigo_activo': ""
+    }
+
+    for key, default in keys_persistentes.items():
+        # Si la cookie existe, la cargamos al estado de la app
+        if key in cookies:
+            # Manejo de tipos de datos (Cookies siempre son strings)
+            val = cookies[key]
+            if val == "True": st.session_state[key] = True
+            elif val == "False": st.session_state[key] = False
+            elif val.isdigit(): st.session_state[key] = int(val)
+            else: st.session_state[key] = val
+        # Si no existe, inicializamos el Session State con el default
+        elif key not in st.session_state:
+            st.session_state[key] = default
+
+sincronizar_sesion_con_cookies()
+
+# 3.3 Inicialización de variables temporales (No persistentes)
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "CONVERTIDOR"
-if 'consultas' not in st.session_state: st.session_state.consultas = 0
-if 'creditos_consumidos' not in st.session_state: st.session_state.creditos_consumidos = 0
 if 'resultado' not in st.session_state: st.session_state.resultado = None
-if 'descargas_kml' not in st.session_state: st.session_state.descargas_kml = 0
 if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
 if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
 
-# Configuración de Límites
+# 3.4 Configuración de Límites Técnicos
 LIMITE_GRATIS_DIARIO = 10
 LIMITE_FILAS_PASE_DIARIO = 500
 LIMITE_KML_PASE_DIARIO = 100
 
-# Reinicio de 24 horas
-if 'inicio_sesion_gratis' not in st.session_state:
-    st.session_state.inicio_sesion_gratis = datetime.now()
+# 3.5 Reinicio de Créditos Gratuitos (Lógica de 24 horas)
+ahora = datetime.now()
+if 'inicio_sesion_gratis' not in cookies:
+    cookies['inicio_sesion_gratis'] = ahora.strftime("%Y-%m-%d %H:%M:%S")
+    cookies.save()
 
-if (datetime.now() - st.session_state.inicio_sesion_gratis) > timedelta(days=1):
-    st.session_state.consultas = 0
-    st.session_state.inicio_sesion_gratis = datetime.now()
-    st.toast("🎁 Tus créditos gratuitos se han renovado.")
+# Comprobamos si ha pasado un día desde la última renovación de créditos gratis
+inicio_dt = datetime.strptime(cookies['inicio_sesion_gratis'], "%Y-%m-%d %H:%M:%S")
+if (ahora - inicio_dt) > timedelta(days=1):
+    if not (st.session_state.es_pro or st.session_state.es_admin):
+        st.session_state.consultas = 0
+        cookies['consultas'] = "0"
+        cookies['inicio_sesion_gratis'] = ahora.strftime("%Y-%m-%d %H:%M:%S")
+        cookies.save()
+        st.toast("🎁 Tus créditos gratuitos se han renovado.", icon="✨")
+
+# 3.6 Función Maestra para Consumo de Créditos
+def consumir_credito(cantidad):
+    """Actualiza el contador tanto en RAM como en la Cookie del navegador"""
+    st.session_state.consultas += cantidad
+    cookies['consultas'] = str(st.session_state.consultas)
+    cookies.save()
 
 # =========================================================
 # BLOQUE 4: MOTOR DE CÁLCULO Y TRANSFORMACIONES CORE
@@ -167,7 +212,7 @@ def realizar_conversion(e, n, zona_str, sentido):
         return None
 
 # =========================================================
-# BLOQUE 5: GENERACIÓN DE ARCHIVOS DE EXPORTACIÓN (KML Y PDF)
+# BLOQUE 5: GENERACIÓN DE ARCHIVOS DE EXPORTACIÓN (KML Y CAD)
 # =========================================================
 
 def generar_kml(lat, lon, nombre="Punto_SP"):
@@ -577,7 +622,6 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                         st.error(f"Error al cargar el mapa: {e}")
 
                 # --- INTEGRACIÓN DE DESCARGAS (BLOQUE 6) ---
-                # Pasamos los datos como tupla para que el Bloque 6 genere el PDF individual
                 mostrar_botones_exportacion(st.session_state.resultado, es_masivo=False)
                 
                 # Botón para limpiar resultado actual
@@ -921,7 +965,7 @@ if st.session_state.menu_actual == "PRO":
                 <ul class="feature-list">
                     <li>✅ Acceso total por 24 horas</li>
                     <li>✅ Carga masiva (Hasta {LIMITE_FILAS_PASE_DIARIO} filas)</li>
-                    <li>✅ Exportación KML e ingeniería</li>
+                    <li>✅ Exportación KML y DXF (hasta 500)</li>
                     <li>✅ Soporte vía WhatsApp</li>
                 </ul>
             </div>
