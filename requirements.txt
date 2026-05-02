@@ -1,8 +1,9 @@
 streamlit
 pandas
+openpyxl
 pyproj
 folium
 streamlit-folium
-st-gsheets-connection
+streamlit-gsheets
 ezdxf
 xlsxwriter

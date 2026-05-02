@@ -91,47 +91,31 @@ def registrar_actividad(tipo, detalle,zona="Desconocida"):
 # =========================================================
 # BLOQUE 3: GESTIÓN DE SESIÓN Y LÓGICA DE TIERS
 # =========================================================
-inicializacion_segura = {
-    'es_pro': False,
-    'es_admin': False,
-    'es_pase_diario': False,
-    'menu_actual': "CONVERTIDOR",
-    'consultas': 0,
-    'creditos_consumidos': 0,
-    'resultado': None,
-    'descargas_kml': 0,
-    'df_temporal': None,
-    'df_para_kml': None,
-    'inicio_sesion_gratis': datetime.now()
-}
+# Inicialización de variables de estado
+if 'es_pro' not in st.session_state: st.session_state.es_pro = False
+if 'es_admin' not in st.session_state: st.session_state.es_admin = False
+if 'es_pase_diario' not in st.session_state: st.session_state.es_pase_diario = False
+if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "CONVERTIDOR"
+if 'consultas' not in st.session_state: st.session_state.consultas = 0
+if 'creditos_consumidos' not in st.session_state: st.session_state.creditos_consumidos = 0
+if 'resultado' not in st.session_state: st.session_state.resultado = None
+if 'descargas_kml' not in st.session_state: st.session_state.descargas_kml = 0
+if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
+if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
 
-for clave, valor_defecto in inicializacion_segura.items():
-    if clave not in st.session_state:
-        st.session_state[clave] = valor_defecto
-
-# 3.2 Configuración de Límites y Constantes
+# Configuración de Límites
 LIMITE_GRATIS_DIARIO = 10
 LIMITE_FILAS_PASE_DIARIO = 500
 LIMITE_KML_PASE_DIARIO = 100
 
-# 3.3 Lógica de Seguridad para len() y Reinicio de 24 horas
-# Verificamos la validez del DataFrame temporal antes de cualquier operación
-def obtener_conteo_seguro(objeto_df):
-    """Retorna el largo del dataframe o 0 si es None/Vacío, evitando errores de len()"""
-    if objeto_df is not None and hasattr(objeto_df, 'index'):
-        return len(objeto_df)
-    return 0
+# Reinicio de 24 horas
+if 'inicio_sesion_gratis' not in st.session_state:
+    st.session_state.inicio_sesion_gratis = datetime.now()
 
-# Reinicio automático de créditos cada 24 horas
-tiempo_transcurrido = datetime.now() - st.session_state.inicio_sesion_gratis
-if tiempo_transcurrido > timedelta(days=1):
+if (datetime.now() - st.session_state.inicio_sesion_gratis) > timedelta(days=1):
     st.session_state.consultas = 0
     st.session_state.inicio_sesion_gratis = datetime.now()
     st.toast("🎁 Tus créditos gratuitos se han renovado.")
-
-# 3.4 Variable de control de bloqueo (Calculada una sola vez)
-puntos_ya_usados = st.session_state.consultas
-puntos_disponibles_hoy = max(0, LIMITE_GRATIS_DIARIO - puntos_ya_usados)
 
 # =========================================================
 # BLOQUE 4: MOTOR DE CÁLCULO Y TRANSFORMACIONES CORE
@@ -206,7 +190,17 @@ def generar_kml_masivo(df):
         
         # IMPORTANTE: El '0' al final de coordinates fuerza la elevación a cero.
         # <altitudeMode>clampToGround</altitudeMode> asegura que el punto toque el relieve.
-        placemarks += f"""<Point><coordinates>{p_lon},{p_lat},0</coordinates></Point>"""
+        placemarks += f"""
+  <Placemark>
+    <name>{nombre_punto}</name>
+    <Style>
+      <IconStyle><color>ff00ffff</color><scale>1.1</scale></IconStyle>
+    </Style>
+    <Point>
+      <altitudeMode>clampToGround</altitudeMode>
+      <coordinates>{p_lon},{p_lat},0</coordinates>
+    </Point>
+  </Placemark>"""
     
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -841,7 +835,6 @@ if st.session_state.menu_actual == "CONVERTIDOR":
 
                             # 4. Actualización de Créditos y Sincronización GSheets
                             puntos_procesados = len(df_a_procesar)
-                            st.session_state.consultas += puntos_procesados
 
                             if st.session_state.get('es_pase_diario') and 'codigo_activo' in st.session_state:
                                 try:
@@ -850,21 +843,26 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                                     fila_mask = df_db['Codigo'].astype(str) == str(cod_actual)
                                     
                                     if fila_mask.any():
-                                        # Sumar al consumo histórico en la nube
+                                        # 1. Obtener lo que ya había consumido en la nube
                                         val_previo = pd.to_numeric(df_db.loc[fila_mask, 'Creditos_Usados'], errors='coerce').fillna(0).iloc[0]
                                         nuevo_total = int(val_previo + puntos_procesados)
+                                        
+                                        # 2. Actualizar la base de datos (GSheets)
                                         df_db.loc[fila_mask, 'Creditos_Usados'] = nuevo_total
                                         conn.update(worksheet="Usuarios", data=df_db)
-                                        # Sincronizar localmente
-                                        st.session_state.consultas = nuevo_total 
+                                        
+                                        # 3. Sincronizar el estado local para que la barra de UI se actualice
+                                        st.session_state.consultas = nuevo_total
                                 except Exception as e:
-                                    st.warning(f"Aviso: Se procesó localmente pero falló la sincronización: {e}")
+                                    st.warning(f"Aviso: Se procesó localmente pero falló la sincronización con la nube: {e}")
+                            else:
+                                st.session_state.consultas += puntos_procesados
+
                             registrar_actividad("Masivo", f"Archivo de {puntos_procesados} puntos", zona=zona_global)
                             # 5. Finalización con éxito
                             st.balloons()
                             st.success(f"✅ ¡Conversión completada! Se procesaron {puntos_procesados} puntos.")
                             time.sleep(1.5) 
-                            st.rerun()
 
 
                 except Exception as e:
