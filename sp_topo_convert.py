@@ -206,17 +206,7 @@ def generar_kml_masivo(df):
         
         # IMPORTANTE: El '0' al final de coordinates fuerza la elevación a cero.
         # <altitudeMode>clampToGround</altitudeMode> asegura que el punto toque el relieve.
-        placemarks += f"""
-  <Placemark>
-    <name>{nombre_punto}</name>
-    <Style>
-      <IconStyle><color>ff00ffff</color><scale>1.1</scale></IconStyle>
-    </Style>
-    <Point>
-      <altitudeMode>clampToGround</altitudeMode>
-      <coordinates>{p_lon},{p_lat},0</coordinates>
-    </Point>
-  </Placemark>"""
+        placemarks += f"""<Point><coordinates>{p_lon},{p_lat},0</coordinates></Point>"""
     
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
