@@ -69,7 +69,7 @@ try:
 except Exception as e:
     st.error(f"Error de conexión a la base de datos: {e}")
 
-def registrar_actividad(tipo, detalle):
+def registrar_actividad(tipo, detalle,zona="Desconocida"):
     """Guarda cada uso en tu hoja de Google Sheets para control administrativo"""
     try:
         # Leemos la hoja 'Logs' sin caché para tener datos frescos
@@ -78,7 +78,7 @@ def registrar_actividad(tipo, detalle):
         nueva_fila = pd.DataFrame([{
             "Fecha": ahora, 
             "Tipo_Uso": tipo, 
-            "Ubicacion": "Nuevo Chimbote", 
+            "Ubicacion": zona, 
             "Detalle": detalle
         }])
         df_final = pd.concat([df_actual, nueva_fila], ignore_index=True)
@@ -464,7 +464,13 @@ else:
 # 2. LÓGICA DEL CONVERTIDOR
 if st.session_state.menu_actual == "CONVERTIDOR":
     st.markdown('<h1 style="margin-bottom: -10px;">SP TOPO-CONVERT 🌍</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="opacity: 0.8; margin-bottom: 20px;"><i>Precisión técnica para ingeniería de software y topografía</i></p>', unsafe_allow_html=True)
+    st.markdown("""
+        <p style="opacity: 0.9; margin-bottom: 20px; font-size: 1.1em; line-height: 1.4;">
+            Esta plataforma ha sido diseñada para <b>convertir y ubicar puntos geográficos en todo el Perú</b> 
+            con precisión profesional. Permite procesar datos individuales o masivos y exportarlos directamente 
+            a formatos <b>KML (Google Earth)</b> e incluso <b>DXF para AutoCAD</b>.
+        </p>
+    """, unsafe_allow_html=True)
 
     # Configuración de modo y zona UTM
     opciones_modo = ["PSAD56 a WGS84 (Convertir)", "WGS84 a PSAD56 (Convertir)", "UBICAR PUNTO WGS84", "UBICAR PUNTO PSAD56"]
@@ -508,6 +514,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                 
                 if st.button(label_boton, use_container_width=True, type="primary"):
                     with st.spinner("Procesando..."):
+                        
                         # Ejecución según el modo seleccionado
                         if "UBICAR" in modo:
                             z_utm = zona_global.replace("S", "")
@@ -523,7 +530,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                         
                         # Consumo de crédito y registro
                         st.session_state.consultas += 1
-                        registrar_actividad("Individual", f"{modo} en {zona_global}")
+                        registrar_actividad("Individual", f"{modo}", zona=zona_global)
                         st.rerun()                 
         with c2:
             if st.session_state.resultado:
@@ -844,7 +851,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                                         st.session_state.consultas = nuevo_total 
                                 except Exception as e:
                                     st.warning(f"Aviso: Se procesó localmente pero falló la sincronización: {e}")
-
+                            registrar_actividad("Masivo", f"Archivo de {puntos_procesados} puntos", zona=zona_global)
                             # 5. Finalización con éxito
                             st.balloons()
                             st.success(f"✅ ¡Conversión completada! Se procesaron {puntos_procesados} puntos.")
@@ -951,7 +958,7 @@ if st.session_state.menu_actual == "PRO":
         # Caja de información de pago destacada con el mensaje corregido
         st.markdown("""
             <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #008080; margin-bottom: 20px;">
-                <p style="margin-bottom: 5px;"><b>Titular:</b> Joan Guevara Zapata</p>
+                <p style="margin-bottom: 5px;"><b>Titular:</b> Joan Gue.</p>
                 <p style="margin-bottom: 5px;"><b>Número:</b> 924 886 915</p>
                 <p style="margin-bottom: 0px; color: #008080; font-weight: bold; font-size: 1.1em;">✅ ¡Código instantáneo por WhatsApp!</p>
             </div>
