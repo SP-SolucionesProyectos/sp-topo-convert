@@ -865,6 +865,7 @@ if st.session_state.menu_actual == "CONVERTIDOR":
                             st.balloons()
                             st.success(f"✅ ¡Conversión completada! Se procesaron {puntos_procesados} puntos.")
                             time.sleep(1.5) 
+                            st.rerun()
 
 
                 except Exception as e:
