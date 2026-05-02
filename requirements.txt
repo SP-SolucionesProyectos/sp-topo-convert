@@ -3,7 +3,7 @@ pandas
 pyproj
 folium
 streamlit-folium
-streamlit-gsheets-connection
+st-gsheets-connection
 ezdxf
 xlsxwriter
 streamlit-cookies-manager
