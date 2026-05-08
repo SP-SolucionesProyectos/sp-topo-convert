@@ -139,7 +139,7 @@ if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
 if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
 
 # 3.4 Configuración de Límites Técnicos
-LIMITE_GRATIS_DIARIO = 10
+LIMITE_GRATIS_DIARIO = 1000
 LIMITE_FILAS_PASE_DIARIO = 500
 LIMITE_KML_PASE_DIARIO = 100
 
