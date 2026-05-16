@@ -3660,7 +3660,7 @@ def render_manual_convertir():
     if input_type == "UTM":
 
         data = render_inputs_utm_manual("manual_convert")
-        data = render_inputs_geo_manual()
+        data = render_inputs_geo_manual("manual_convert")
 
     ejecutar = st.button(
         "Convertir punto",
