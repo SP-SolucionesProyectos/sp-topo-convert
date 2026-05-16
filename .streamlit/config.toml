@@ -11,4 +11,4 @@ webhookRequestTimeout = 200
 
 [theme]
 # (Opcional) Si quieres asegurar que tus colores carguen rápido
-primaryColor = "#008080"
+primaryColor = "#68eded"
