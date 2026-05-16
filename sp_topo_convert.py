@@ -1,1178 +1,7823 @@
 # =========================================================
-# BLOQUE 1: IMPORTACIONES Y CONFIGURACIÓN DE PÁGINA
+# SP Topo-Convert V7 | PARTE 1
+# Base limpia: imports, config, sesión, logo y helpers
 # =========================================================
-import streamlit as st
-import pandas as pd
-import pyproj
-import folium
+
 import os
 import io
-from datetime import datetime, timedelta
-from streamlit_folium import folium_static
-from streamlit_gsheets import GSheetsConnection
-import ezdxf
+import re
+import json
 import time
+import uuid
 import string
-try:
-    from streamlit_cookies_manager import EncryptedCookieManager
-except ImportError:
-    st.error("Error: La librería 'streamlit-cookies-manager' no está instalada. Verifica tu archivo requirements.txt")
-    st.stop()
+from datetime import datetime, timedelta
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+import pyproj
+import folium
+import ezdxf
+
+from PIL import Image
+from streamlit_folium import folium_static
+from streamlit_cookies_manager import EncryptedCookieManager
+from pathlib import Path
+from contextlib import contextmanager
+from datetime import datetime, timedelta, date
+from google.oauth2.service_account import Credentials
+import gspread
+# =========================================================
+# CONFIGURACIÓN DE PÁGINA
+# =========================================================
+
+st.set_page_config(
+    page_title="SP Topo-Convert",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 
-# Configuración de pestaña (Debe ser lo primero siempre)
-st.set_page_config(page_title="SP Topo-Convert", layout="wide", page_icon="🌍")
+# =========================================================
+# ESTILO VISUAL
+# =========================================================
 
-#1.1 INYECCIÓN DE ESTILOS PERSONALIZADOS (Versión Optimizada sin perder estilo)
-st.markdown("""
+st.markdown(
+    """
     <style>
-    /* Ajuste de espacio superior para que no se vea vacío arriba */
-    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
-    
-    /* Colores corporativos de SP Soluciones y Proyectos */
-    .stApp { background-color: #fffdf0; } /* Fondo crema claro */
-    
-    [data-testid="stSidebar"] { 
-        background-color: #008080; 
-        border-right: 3px solid #006666; 
+    .stApp {
+        background: #F5F7FA;
     }
-
-    /* Botones de navegación grandes y llamativos */
-    .stButton > button {
-        height: 3.5rem !important;
-        width: 100% !important;
-        font-size: 1.1rem !important;
-        font-weight: bold !important;
-        border-radius: 12px !important;
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0A3D62 0%, #082C47 100%);
     }
-
-    /* Tarjetas de resultados con sombra profesional */
-    .res-card {
+    h1, h2, h3, h4, h5, h6 {
+        color: #0A3D62;
+    }
+    .small-muted {
+        color: #607080;
+        font-size: 0.92rem;
+    }
+    .card-res {
         background: white;
-        padding: 20px;
-        border-radius: 15px;
-        border-left: 10px solid #008080;
-        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
-        margin-bottom: 10px;
+        border-left: 8px solid #0A3D62;
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+        margin-bottom: 12px;
     }
-
-    /* Eliminación de espacios innecesarios entre elementos */
-    [data-testid="stVerticalBlock"] > div {
-        padding-top: 0.1rem !important;
-        padding-bottom: 0.1rem !important;
+    .stButton > button {
+        background: #0A3D62;
+        color: white;
+        border-radius: 12px;
+        border: none;
+        font-weight: 700;
+        height: 3rem;
+    }
+    .stDownloadButton > button {
+        background: #F6B93B;
+        color: #1f1f1f;
+        border-radius: 12px;
+        border: none;
+        font-weight: 700;
+        height: 3rem;
+    }
+    .footer-box {
+        text-align: center;
+        color: #607080;
+        padding: 18px 0 6px 0;
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =========================================================
-# BLOQUE 2: CONEXIÓN A BASE DE DATOS Y LOGS (CEREBRO)
+# CONSTANTES GLOBALES
 # =========================================================
-try:
-    # Tu conexión establecida en .streamlit/secrets.toml
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error(f"Error de conexión a la base de datos: {e}")
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+SHEET_ID = "1olSmRjPHBYV-NTc-GtrVWU2DBB13haPIixZfz6QzUOw"
 
-def registrar_actividad(tipo, detalle,zona="Desconocida"):
-    """Guarda cada uso en tu hoja de Google Sheets para control administrativo"""
-    try:
-        # Leemos la hoja 'Logs' sin caché para tener datos frescos
-        df_actual = conn.read(worksheet="Logs", ttl=0)
-        ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        nueva_fila = pd.DataFrame([{
-            "Fecha": ahora, 
-            "Tipo_Uso": tipo, 
-            "Ubicacion": zona, 
-            "Detalle": detalle
-        }])
-        df_final = pd.concat([df_actual, nueva_fila], ignore_index=True)
-        conn.update(worksheet="Logs", data=df_final)
-    except:
-        # Si falla el internet o el log, el programa sigue funcionando para el usuario
-        pass
+APP_NAME = "SP Topo-Convert"
+APP_VERSION = "7.0.0"
+FREE_DAILY_CREDITS = 5
+FREE_MAX_ROWS = 20
+FREE_EXPORTS_PER_DAY = 5
+MAX_MASSIVE_ROWS = 50000
+MAX_PREVIEW_ROWS = 100
+VALID_ZONES = ["17S", "18S", "19S"]
+VALID_INPUT_TYPES = ["UTM", "GEO"]
+VALID_ACTIONS = ["convertir", "ubicar"]
+VALID_CONVERSIONS = ["PSAD56_to_WGS84", "WGS84_to_PSAD56"]
+BASE_COLUMNS = ["PUNTO", "ESTE", "NORTE", "LAT", "LON", "Z", "DESCRIPCION", "ERROR"]
+PLANES = ["FREE", "DIARIO", "SEMANAL", "MENSUAL", "ANUAL", "PRO", "ADMIN"]
+
+LOGO_PATH = Path("logo.png")
+PERU_CENTER = (-9.189967, -75.015152)
+
+VALID_DATUMS = ["PSAD56", "WGS84"]
+
+COLUMN_ALIASES = {
+    "PUNTO": ["PUNTO", "ID", "PTO", "POINT", "NOMBRE"],
+    "ESTE": ["ESTE", "EAST", "X"],
+    "NORTE": ["NORTE", "NORTH", "Y"],
+    "LAT": ["LAT", "LATITUD", "LATITUDE"],
+    "LON": ["LON", "LONGITUD", "LONGITUDE"],
+    "Z": ["Z", "COTA", "ELEVACION", "ELEV", "ALTURA"],
+    "DESCRIPCION": ["DESCRIPCION", "DESC", "OBS", "DETALLE"],
+}
 
 # =========================================================
-# BLOQUE 3: GESTIÓN DE SESIÓN Y LÓGICA DE TIERS
+# SESSION STATE
 # =========================================================
-# 3.1 Configuración del Administrador de Cookies
-# Nota: La password debe ser larga y segura para el cifrado
+
+def init_session_state():
+    defaults = {
+        "fecha_expiracion": "",
+        "ultima_fecha_free": "",
+        "user_id": "anon",
+        "local_user_id": "",
+        "plan": "FREE",
+        "tipo_licencia": "NINGUNA",
+        "es_pro": False,
+        "es_admin": False,
+        "credits_free": FREE_DAILY_CREDITS,
+        "credits_used_today": 0,
+        "free_massive_used": 0,
+        "free_exports_used": 0,
+        "ultima_fecha_free": "",
+        "df_original": None,
+        "df_resultado": None,
+        "df_export": None,
+        "errores": [],
+        "config": {},
+        "menu_actual": "CONVERTIR",
+        "submodulo_actual": "MANUAL",
+        "onboarding_visto": False,
+        "last_message": "",
+        "procesando": False,
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+# =========================================================
+# COOKIES
+# =========================================================
+
 cookies = EncryptedCookieManager(
     password=os.environ.get("COOKIE_PASSWORD", "SP_Topo_Secure_Key_2026_JGZ"),
-    prefix="sp_topo/"
+    prefix="sp_topo/",
 )
 
 if not cookies.ready():
-    st.stop()  # Espera a que las cookies carguen antes de seguir
+    st.stop()
 
-# 3.2 Sincronización de Cookies con Session State
-# Esta lógica asegura que si existe una cookie, el Session State la tome como prioridad.
-def sincronizar_sesion_con_cookies():
-    # Mapeo de estados persistentes
-    keys_persistentes = {
-        'es_pro': False,
-        'es_admin': False,
-        'es_pase_diario': False,
-        'consultas': 0,
-        'codigo_activo': ""
-    }
-
-    for key, default in keys_persistentes.items():
-        # Si la cookie existe, la cargamos al estado de la app
-        if key in cookies:
-            # Manejo de tipos de datos (Cookies siempre son strings)
-            val = cookies[key]
-            if val == "True": st.session_state[key] = True
-            elif val == "False": st.session_state[key] = False
-            elif val.isdigit(): st.session_state[key] = int(val)
-            else: st.session_state[key] = val
-        # Si no existe, inicializamos el Session State con el default
-        elif key not in st.session_state:
-            st.session_state[key] = default
-
-sincronizar_sesion_con_cookies()
-
-# 3.3 Inicialización de variables temporales (No persistentes)
-if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "CONVERTIDOR"
-if 'resultado' not in st.session_state: st.session_state.resultado = None
-if 'df_temporal' not in st.session_state: st.session_state.df_temporal = None
-if 'df_para_kml' not in st.session_state: st.session_state.df_para_kml = None
-
-# 3.4 Configuración de Límites Técnicos
-LIMITE_GRATIS_DIARIO = 1000
-LIMITE_FILAS_PASE_DIARIO = 500
-LIMITE_KML_PASE_DIARIO = 100
-
-# 3.5 Reinicio de Créditos Gratuitos (Lógica de 24 horas)
-ahora = datetime.now()
-if 'inicio_sesion_gratis' not in cookies:
-    cookies['inicio_sesion_gratis'] = ahora.strftime("%Y-%m-%d %H:%M:%S")
-    cookies.save()
-
-# Comprobamos si ha pasado un día desde la última renovación de créditos gratis
-inicio_dt = datetime.strptime(cookies['inicio_sesion_gratis'], "%Y-%m-%d %H:%M:%S")
-if (ahora - inicio_dt) > timedelta(days=1):
-    if not (st.session_state.es_pro or st.session_state.es_admin):
-        st.session_state.consultas = 0
-        cookies['consultas'] = "0"
-        cookies['inicio_sesion_gratis'] = ahora.strftime("%Y-%m-%d %H:%M:%S")
-        cookies.save()
-        st.toast("🎁 Tus créditos gratuitos se han renovado.", icon="✨")
-
-# 3.6 Función Maestra para Consumo de Créditos
-def consumir_credito(cantidad):
-    """Actualiza el contador tanto en RAM como en la Cookie del navegador"""
-    st.session_state.consultas += cantidad
-    cookies['consultas'] = str(st.session_state.consultas)
-    cookies.save()
 
 # =========================================================
-# BLOQUE 4: MOTOR DE CÁLCULO Y TRANSFORMACIONES CORE
+# HELPERS BÁSICOS
 # =========================================================
-def validar_coordenadas_utm(e, n):
-    """Verifica si las coordenadas están dentro de rangos técnicos razonables"""
-    # Rango típico UTM: Este entre 100k-900k | Norte entre 0 y 10M
-    if not (100000 <= e <= 900000):
-        return False, f"Este ({e}) fuera de rango UTM."
-    if not (0 <= n <= 10000000):
-        return False, f"Norte ({n}) fuera de rango UTM."
-    return True, ""
 
-def realizar_conversion(e, n, zona_str, sentido):
-    try:
-        z_utm = zona_str.replace("S", "")
-        
-        # CASO A: SOLO UBICAR (No hay transformación Helmert)
-        if "UBICAR" in sentido:
-            # Determinamos el datum de entrada para el mapa
-            datum_entrada = "epsg:327" if "WGS84" in sentido else "epsg:248" # Simplificado para el ejemplo
-            # Usamos WGS84 (327 + zona) por defecto para el mapa de Google Earth
-            geo_trans = pyproj.Transformer.from_crs(f"epsg:327{z_utm}", "epsg:4326", always_xy=True)
-            lon, lat = geo_trans.transform(e, n)
-            return e, n, lat, lon # Devuelve los mismos E, N originales
+def now_str():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # CASO B: CONVERSIÓN REAL (Tu código original de Helmert)
-        if "PSAD56 a WGS84" in sentido:
-            p = (f"+proj=pipeline +step +inv +proj=utm +zone={z_utm} +south +ellps=intl "
-                 f"+step +proj=cart +ellps=intl "
-                 f"+step +proj=helmert +x=-288 +y=175 +z=-376 "
-                 f"+step +inv +proj=cart +ellps=WGS84 "
-                 f"+step +proj=utm +zone={z_utm} +south +ellps=WGS84")
+
+def today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def generar_uuid():
+    return str(uuid.uuid4())
+
+
+def get_or_create_user_id():
+    if not st.session_state.local_user_id:
+        cookie_user = cookies.get("local_user_id", "")
+        if cookie_user:
+            st.session_state.local_user_id = cookie_user
         else:
-            p = (f"+proj=pipeline +step +inv +proj=utm +zone={z_utm} +south +ellps=WGS84 "
-                 f"+step +proj=cart +ellps=WGS84 "
-                 f"+step +inv +proj=helmert +x=-288 +y=175 +z=-376 "
-                 f"+step +inv +proj=cart +ellps=intl "
-                 f"+step +proj=utm +zone={z_utm} +south +ellps=intl")
-        
-        trans = pyproj.Transformer.from_pipeline(p)
-        re, rn = trans.transform(e, n)
-        geo_trans = pyproj.Transformer.from_crs(f"epsg:327{z_utm}", "epsg:4326", always_xy=True)
-        # Si el destino es WGS84 usamos los resultados, si no, los originales para el mapa
-        lon, lat = geo_trans.transform(re if "WGS84" in sentido else e, rn if "WGS84" in sentido else n)
-        
-        return re, rn, lat, lon
-    except Exception as e:
-        return None
+            st.session_state.local_user_id = generar_uuid()
+            cookies["local_user_id"] = st.session_state.local_user_id
+            cookies.save()
+    return st.session_state.local_user_id
 
-# =========================================================
-# BLOQUE 5: GENERACIÓN DE ARCHIVOS DE EXPORTACIÓN (KML Y CAD)
-# =========================================================
 
-def generar_kml(lat, lon, nombre="Punto_SP"):
-    """Crea estructura KML estándar para un solo punto"""
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Placemark>
-    <name>{nombre}</name>
-    <description>Convertido por SP Topo-Convert</description>
-    <Point><coordinates>{lon},{lat},0</coordinates></Point>
-  </Placemark>
-</kml>"""
+def normalizar_texto(valor):
+    if valor is None:
+        return ""
+    if isinstance(valor, float) and np.isnan(valor):
+        return ""
+    if pd.isna(valor):
+        return ""
+    return str(valor).strip()
 
-def generar_kml_masivo(df):
-    """Crea un archivo KML optimizado para Google Earth (Sujeto al suelo)"""
-    placemarks = ""
-    for i, row in df.iterrows():
-        p_lat, p_lon = row.get('LAT', 0), row.get('LON', 0)
-        nombre_punto = row.get('PUNTO', f"P-{(i+1)}")
-        
-        # IMPORTANTE: El '0' al final de coordinates fuerza la elevación a cero.
-        # <altitudeMode>clampToGround</altitudeMode> asegura que el punto toque el relieve.
-        placemarks += f"""
-  <Placemark>
-    <name>{nombre_punto}</name>
-    <Style>
-      <IconStyle><color>ff00ffff</color><scale>1.1</scale></IconStyle>
-    </Style>
-    <Point>
-      <altitudeMode>clampToGround</altitudeMode>
-      <coordinates>{p_lon},{p_lat},0</coordinates>
-    </Point>
-  </Placemark>"""
-    
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>Levantamiento SP - Nuevo Chimbote</name>
-    {placemarks}
-  </Document>
-</kml>"""
 
-def exportar_cad(df, col_p, col_e, col_n, col_z=None, col_c=None):
-    """Genera un archivo DXF con puntos 3D y etiquetas de ingeniería"""
+def sanitizar_texto(valor):
+    texto = normalizar_texto(valor)
+    texto = texto.replace("\n", " ").replace("\r", " ")
+    texto = re.sub(r"[<>]", "", texto)
+    return texto[:200]
+
+
+def limpiar_numero(valor):
+    if valor is None:
+        return np.nan
+    if pd.isna(valor):
+        return np.nan
+    if isinstance(valor, str):
+        valor = valor.strip().replace(",", ".")
+        if valor == "":
+            return np.nan
     try:
-        doc = ezdxf.new('R2010')
-        doc.header['$PDMODE'] = 3 
-        doc.header['$PDSIZE'] = 0.5
-        
-        msp = doc.modelspace()
-        
-        # Capas con colores estándar de topografía
-        doc.layers.new(name='SP_PUNTOS', dxfattribs={'color': 1})     # Rojo
-        doc.layers.new(name='SP_NRO_PUNTO', dxfattribs={'color': 2}) # Amarillo
-        doc.layers.new(name='SP_ELEVACION', dxfattribs={'color': 4}) # Cian (estándar para Z)
-        doc.layers.new(name='SP_CODIGO', dxfattribs={'color': 3})    # Verde
+        return float(valor)
+    except Exception:
+        return np.nan
 
-        for _, row in df.iterrows():
-            try:
-                def limpiar(v): return float(str(v).replace(',', '.'))
-                
-                p_id = str(row[col_p])
-                e = limpiar(row[col_e])
-                n = limpiar(row[col_n])
-                # Elevación opcional (si no hay, se asume 0)
-                z = limpiar(row[col_z]) if col_z and col_z in row else 0.0
-                txt_cod = str(row[col_c]) if col_c and col_c in row else ""
 
-                # 1. El Punto en 3D (X, Y, Z)
-                msp.add_point((e, n, z), dxfattribs={'layer': 'SP_PUNTOS'})
+def letras_excel(indice):
+    resultado = ""
+    n = int(indice)
+    while n >= 0:
+        resultado = string.ascii_uppercase[n % 26] + resultado
+        n = n // 26 - 1
+    return resultado
 
-                # 2. Etiquetas (Ajustadas para no solaparse)
-                # Número de Punto (Arriba derecha)
-                msp.add_text(p_id, dxfattribs={'layer': 'SP_NRO_PUNTO', 'height': 0.3}).set_placement((e + 0.4, n + 0.4))
-                
-                # Elevación (Centro derecha)
-                if col_z:
-                    msp.add_text(f"{z:.3f}", dxfattribs={'layer': 'SP_ELEVACION', 'height': 0.3}).set_placement((e + 0.4, n))
 
-                # Código/Descripción (Abajo derecha)
-                if txt_cod and txt_cod != "nan":
-                    msp.add_text(txt_cod, dxfattribs={'layer': 'SP_CODIGO', 'height': 0.3}).set_placement((e + 0.4, n - 0.4))
-            except:
-                continue 
+def generar_nombre_archivo(base, ext):
+    fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{base}_{fecha}.{ext}"
 
-        out = io.StringIO()
-        doc.write(out)
-        return out.getvalue()
+
+def mostrar_mensaje(msg, tipo="info"):
+    st.session_state.last_message = msg
+    if tipo == "success":
+        st.success(msg)
+    elif tipo == "warning":
+        st.warning(msg)
+    elif tipo == "error":
+        st.error(msg)
+    else:
+        st.info(msg)
+
+
+# =========================================================
+# LOGO Y HEADER BASE
+# =========================================================
+
+def cargar_logo(path="logo.png"):
+    try:
+        if os.path.exists(path):
+            return Image.open(path)
     except Exception:
         return None
+    return None
+
+
+def render_logo_sidebar():
+    logo = cargar_logo()
+    with st.sidebar:
+        if logo is not None:
+            st.image(logo, use_container_width=True)
+        st.markdown(f"### {APP_NAME}")
+        st.caption(f"Versión {APP_VERSION}")
+
+
+def render_header_base(titulo, subtitulo=""):
+    st.markdown(f"# {titulo}")
+    if subtitulo:
+        st.markdown(f"<div class='small-muted'>{subtitulo}</div>", unsafe_allow_html=True)
+
 
 # =========================================================
-# BLOQUE 6: SISTEMA DE EXPORTACIÓN PROFESIONAL (KML & CAD) - ACCESO ABIERTO
+# HELPERS DE DATOS
 # =========================================================
-def mostrar_botones_exportacion(datos, es_masivo=False, col_z=None, col_c=None):
 
-    """
-    Gestiona la descarga de archivos con lógica de "Endulce":
-    - Gratis: Descarga KML y DXF limitados a los primeros 10 puntos.
-    - Pase Diario: KML y DXF limitados a 100 y 500 pts respectivamente.
-    - Pro/Admin: Sin límites.
-    """
-    
-    # 1. Definición de Permisos y Límites
-    es_premium = (st.session_state.get('es_pro', False) or st.session_state.get('es_admin', False))
-    es_pase = st.session_state.get('es_pase_diario', False)
-    
-    # Determinamos el límite de puntos según el plan para el "recorte"
-    if es_premium:
-        limite_puntos = 999999 
-    elif es_pase:
-        limite_puntos = LIMITE_FILAS_PASE_DIARIO # 500 puntos
-    else:
-        limite_puntos = LIMITE_GRATIS_DIARIO # 10 puntos
+def crear_df_base_vacio():
+    return pd.DataFrame(columns=BASE_COLUMNS)
 
-    # 2. Preparación de datos (Recorte)
-    if es_masivo:
-        datos_a_exportar = datos.head(limite_puntos)
-        puntos_finales = len(datos_a_exportar)
-        
-        if es_premium:
-            # Si es PRO o ADMIN, no mostramos mensaje de "recorte"
-            pass
-        elif es_pase:
-            # Si es PASE DIARIO, solo avisamos si el archivo original era más grande que 500
-            if len(datos) > LIMITE_FILAS_PASE_DIARIO:
-                st.info(f"🎫 **Pase Diario:** Tu archivo excedió el límite y se procesaron los primeros {puntos_finales} puntos.")
-        else:
-            # Si es GRATUITO, siempre mostramos el mensaje informativo
-            st.info(f"💡 **Modo Gratuito:** Tu archivo pudo procesar los primeros {puntos_finales} puntos.")
-    else:
-        datos_a_exportar = datos
 
-    st.write("---")
-    st.markdown("##### 📥 Generar Archivos de Ingeniería")
-    
-    col_kml, col_cad = st.columns(2)
-    
-    # --- SUB-BLOQUE: KML (Google Earth) ---
-    with col_kml:
+def crear_df_manual_utm(punto, este, norte, z=None, descripcion=None):
+    return pd.DataFrame([
+        {
+            "PUNTO": punto,
+            "ESTE": este,
+            "NORTE": norte,
+            "LAT": np.nan,
+            "LON": np.nan,
+            "Z": z if z is not None else np.nan,
+            "DESCRIPCION": descripcion if descripcion is not None else "",
+            "ERROR": "",
+        }
+    ])
+
+
+def crear_df_manual_geo(punto, lat, lon, z=None, descripcion=None):
+    return pd.DataFrame([
+        {
+            "PUNTO": punto,
+            "ESTE": np.nan,
+            "NORTE": np.nan,
+            "LAT": lat,
+            "LON": lon,
+            "Z": z if z is not None else np.nan,
+            "DESCRIPCION": descripcion if descripcion is not None else "",
+            "ERROR": "",
+        }
+    ])
+
+
+def normalizar_base(df):
+    if df is None or df.empty:
+        return crear_df_base_vacio()
+
+    df = df.copy()
+    for col in BASE_COLUMNS:
+        if col not in df.columns:
+            df[col] = np.nan if col in ["ESTE", "NORTE", "LAT", "LON", "Z"] else ""
+    return df[BASE_COLUMNS].copy()
+
+
+# =========================================================
+# UI BASE
+# =========================================================
+
+def render_footer_base():
+    st.markdown("---")
+    st.markdown(
+        "<div class='footer-box'>SP Topo-Convert | Procesamiento geoespacial profesional</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_sidebar_base():
+    with st.sidebar:
+        st.divider()
+        st.markdown("## Navegación")
+        if st.button("Convertir", use_container_width=True):
+            st.session_state.menu_actual = "CONVERTIR"
+        if st.button("Ubicar", use_container_width=True):
+            st.session_state.menu_actual = "UBICAR"
+        if st.button("Planes", use_container_width=True):
+            st.session_state.menu_actual = "PLANES"
+        if st.button("Soporte", use_container_width=True):
+            st.session_state.menu_actual = "SOPORTE"
+        st.divider()
+        st.markdown("## Estado")
+        st.caption(f"Plan: {st.session_state.plan}")
+        st.caption(f"Créditos free: {st.session_state.credits_free}")
+        st.caption(f"Usuario: {st.session_state.local_user_id[:8] if st.session_state.local_user_id else 'anon'}")
+
+
+# =========================================================
+# INICIALIZACIÓN
+# =========================================================
+
+init_session_state()
+get_or_create_user_id()
+render_logo_sidebar()
+# =========================================================
+# SP Topo-Convert V7 | PARTE 2
+# Google Sheets, usuarios, licencias, logs y tickets
+# =========================================================
+
+
+# =========================================================
+# CONEXIÓN GOOGLE SHEETS
+# =========================================================
+
+@st.cache_resource
+def connect_gsheet():
+    try:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=SCOPES,
+        )
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(SHEET_ID)
+        return spreadsheet
+    except Exception as e:
+        st.error(f"Error Google Sheets: {e}")
+        return None
+
+
+def load_sheet(sheet_name):
+    try:
+        ss = connect_gsheet()
+        if ss is None:
+            return pd.DataFrame()
+
+        ws = ss.worksheet(sheet_name)
+        records = ws.get_all_records()
+        return pd.DataFrame(records)
+
+    except Exception as e:
+        mostrar_mensaje(f"Error leyendo hoja {sheet_name}: {e}", "error")
+        return pd.DataFrame()
+
+
+def save_sheet(sheet_name, df):
+    try:
+        ss = connect_gsheet()
+        if ss is None:
+            return False
+
+        ws = ss.worksheet(sheet_name)
+        df2 = df.copy().fillna("")
+        data = [df2.columns.tolist()] + df2.astype(str).values.tolist()
+
+        ws.clear()
+        ws.update(data)
+        return True
+
+    except Exception as e:
+        mostrar_mensaje(f"Error guardando hoja {sheet_name}: {e}", "error")
+        return False
+
+# =========================================================
+# CARGAR TABLAS
+# =========================================================
+
+def get_usuarios_df():
+    df = load_sheet("Usuarios")
+
+    if df.empty:
+        columns = [
+            "user_id",
+            "plan",
+            "tipo_licencia",
+            "fecha_activacion",
+            "fecha_expiracion",
+            "creditos_disponibles",
+            "ultima_fecha_free",
+            "ultima_ip",
+        ]
+        df = pd.DataFrame(columns=columns)
+
+    return df
+
+
+def get_licencias_df():
+    df = load_sheet("Licencias")
+
+    if df.empty:
+        columns = [
+            "codigo",
+            "plan_tipo",
+            "estado",
+            "usado_por",
+            "fecha_uso",
+        ]
+        df = pd.DataFrame(columns=columns)
+
+    return df
+
+
+def get_logs_df():
+    df = load_sheet("Logs")
+
+    if df.empty:
+        columns = [
+            "fecha",
+            "user_id",
+            "licencia_activa",
+            "accion",
+            "nombre_archivo",
+            "puntos_ok",
+            "errores_filas",
+            "tiempo_ejecucion",
+        ]
+        df = pd.DataFrame(columns=columns)
+
+    return df
+
+
+def get_tickets_df():
+    df = load_sheet("Tickets")
+
+    if df.empty:
+        columns = [
+            "ticket_id",
+            "user_id",
+            "mensaje",
+            "estado",
+            "respuesta",
+            "fecha",
+        ]
+        df = pd.DataFrame(columns=columns)
+
+    return df
+
+
+# =========================================================
+# USUARIOS
+# =========================================================
+
+def buscar_usuario(user_id):
+    df = get_usuarios_df()
+
+    if df.empty:
+        return None
+
+    result = df[df["user_id"].astype(str) == str(user_id)]
+
+    if result.empty:
+        return None
+
+    return result.iloc[0].to_dict()
+
+
+def crear_usuario_free(user_id):
+    df = get_usuarios_df()
+
+    nuevo = {
+        "user_id": user_id,
+        "plan": "FREE",
+        "tipo_licencia": "NINGUNA",
+        "fecha_activacion": "",
+        "fecha_expiracion": "",
+        "creditos_disponibles": FREE_DAILY_CREDITS,
+        "ultima_fecha_free": today_str(),
+        "ultima_ip": "",
+    }
+
+    df = pd.concat([df, pd.DataFrame([nuevo])], ignore_index=True)
+
+    save_sheet("Usuarios", df)
+
+    return nuevo
+
+
+def actualizar_usuario(user_id, updates):
+    df = get_usuarios_df()
+
+    if df.empty:
+        return False
+
+    idx = df[df["user_id"].astype(str) == str(user_id)].index
+
+    if len(idx) == 0:
+        return False
+
+    idx = idx[0]
+
+    for key, value in updates.items():
+        if key in df.columns:
+            df.at[idx, key] = value
+
+    return save_sheet("Usuarios", df)
+
+
+def cargar_usuario_session(user_data):
+    st.session_state.user_id = user_data.get("user_id", "")
+    st.session_state.plan = user_data.get("plan", "FREE")
+    st.session_state.tipo_licencia = user_data.get("tipo_licencia", "NINGUNA")
+
+    try:
+        st.session_state.credits_free = int(
+            user_data.get("creditos_disponibles", FREE_DAILY_CREDITS)
+        )
+    except:
+        st.session_state.credits_free = FREE_DAILY_CREDITS
+
+    st.session_state.es_admin = (
+        str(user_data.get("tipo_licencia", "")).upper() == "ADMIN"
+    )
+
+    st.session_state.es_pro = (
+        st.session_state.plan != "FREE"
+    )
+
+
+def iniciar_usuario():
+    user_id = st.session_state.local_user_id
+
+    user_data = buscar_usuario(user_id)
+
+    if user_data is None:
+        user_data = crear_usuario_free(user_id)
+
+    cargar_usuario_session(user_data)
+
+
+# =========================================================
+# RESET CRÉDITOS FREE
+# =========================================================
+
+def reset_creditos_diarios():
+    if st.session_state.plan != "FREE":
+        return
+
+    user_data = buscar_usuario(st.session_state.user_id)
+
+    if user_data is None:
+        return
+
+    ultima_fecha = str(user_data.get("ultima_fecha_free", ""))
+
+    if ultima_fecha != today_str():
+
+        actualizar_usuario(
+            st.session_state.user_id,
+            {
+                "creditos_disponibles": FREE_DAILY_CREDITS,
+                "ultima_fecha_free": today_str(),
+            },
+        )
+
+        st.session_state.credits_free = FREE_DAILY_CREDITS
+
+
+# =========================================================
+# LICENCIAS
+# =========================================================
+
+def buscar_licencia(codigo):
+    df = get_licencias_df()
+
+    if df.empty:
+        return None
+
+    result = df[df["codigo"].astype(str) == str(codigo)]
+
+    if result.empty:
+        return None
+
+    return result.iloc[0].to_dict()
+
+
+def activar_licencia(codigo):
+    licencia = buscar_licencia(codigo)
+
+    if licencia is None:
+        return False, "Licencia no encontrada"
+
+    estado = str(licencia.get("estado", "")).upper()
+
+    if estado == "USADO":
+        return False, "Licencia ya utilizada"
+
+    plan_tipo = str(licencia.get("plan_tipo", "")).upper()
+
+    ahora = datetime.now()
+
+    expiracion = ""
+
+    if plan_tipo == "DIARIO":
+        expiracion = ahora + timedelta(days=1)
+
+    elif plan_tipo == "SEMANAL":
+        expiracion = ahora + timedelta(days=7)
+
+    elif plan_tipo == "MENSUAL":
+        expiracion = ahora + timedelta(days=30)
+
+    elif plan_tipo == "ANUAL":
+        expiracion = ahora + timedelta(days=365)
+
+    elif plan_tipo == "ADMIN":
+        expiracion = ahora + timedelta(days=3650)
+
+    actualizar_usuario(
+        st.session_state.user_id,
+        {
+            "plan": "PRO" if plan_tipo != "ADMIN" else "ADMIN",
+            "tipo_licencia": plan_tipo,
+            "fecha_activacion": now_str(),
+            "fecha_expiracion": expiracion.strftime("%Y-%m-%d %H:%M:%S"),
+            "creditos_disponibles": 999999,
+        },
+    )
+
+    df = get_licencias_df()
+
+    idx = df[df["codigo"].astype(str) == str(codigo)].index
+
+    if len(idx) > 0:
+
+        idx = idx[0]
+
+        df.at[idx, "estado"] = "USADO"
+        df.at[idx, "usado_por"] = st.session_state.user_id
+        df.at[idx, "fecha_uso"] = now_str()
+
+        save_sheet("Licencias", df)
+
+    iniciar_usuario()
+
+    return True, f"Licencia {plan_tipo} activada"
+
+
+# =========================================================
+# VALIDAR EXPIRACIÓN
+# =========================================================
+
+def validar_expiracion_pro():
+    if st.session_state.plan == "FREE":
+        return
+
+    user_data = buscar_usuario(st.session_state.user_id)
+
+    if user_data is None:
+        return
+
+    fecha_exp = str(user_data.get("fecha_expiracion", "")).strip()
+
+    if fecha_exp == "":
+        return
+
+    try:
+
+        fecha_exp = datetime.strptime(
+            fecha_exp,
+            "%Y-%m-%d %H:%M:%S",
+        )
+
+        if datetime.now() > fecha_exp:
+
+            actualizar_usuario(
+                st.session_state.user_id,
+                {
+                    "plan": "FREE",
+                    "tipo_licencia": "NINGUNA",
+                    "creditos_disponibles": FREE_DAILY_CREDITS,
+                },
+            )
+
+            iniciar_usuario()
+
+            mostrar_mensaje(
+                "Tu licencia expiró, regresaste al plan FREE",
+                "warning",
+            )
+
+    except:
+        pass
+
+
+# =========================================================
+# LOGS
+# =========================================================
+
+def registrar_log(
+    accion="",
+    nombre_archivo="",
+    puntos_ok=0,
+    errores_filas=0,
+    tiempo_ejecucion=0,
+):
+
+    df = get_logs_df()
+
+    nuevo = {
+        "fecha": now_str(),
+        "user_id": st.session_state.user_id,
+        "licencia_activa": st.session_state.tipo_licencia,
+        "accion": accion,
+        "nombre_archivo": nombre_archivo,
+        "puntos_ok": puntos_ok,
+        "errores_filas": errores_filas,
+        "tiempo_ejecucion": tiempo_ejecucion,
+    }
+
+    df = pd.concat([df, pd.DataFrame([nuevo])], ignore_index=True)
+
+    save_sheet("Logs", df)
+
+
+# =========================================================
+# TICKETS
+# =========================================================
+
+def crear_ticket(mensaje):
+    df = get_tickets_df()
+
+    nuevo = {
+        "ticket_id": generar_uuid(),
+        "user_id": st.session_state.user_id,
+        "mensaje": sanitizar_texto(mensaje),
+        "estado": "ABIERTO",
+        "respuesta": "",
+        "fecha": now_str(),
+    }
+
+    df = pd.concat([df, pd.DataFrame([nuevo])], ignore_index=True)
+
+    save_sheet("Tickets", df)
+
+    return True
+
+
+def listar_mis_tickets():
+    df = get_tickets_df()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    return df[
+        df["user_id"].astype(str)
+        == str(st.session_state.user_id)
+    ]
+
+
+# =========================================================
+# INICIALIZAR USUARIO REAL
+# =========================================================
+
+iniciar_usuario()
+reset_creditos_diarios()
+validar_expiracion_pro()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 3
+# Validadores, archivos, columnas y normalización
+# =========================================================
+
+
+# =========================================================
+# VALIDAR EXTENSIONES
+# =========================================================
+
+VALID_FILE_EXTENSIONS = [
+    "csv",
+    "xlsx",
+    "xls",
+    "txt",
+]
+
+
+def obtener_extension_archivo(filename):
+    if "." not in filename:
+        return ""
+    return filename.split(".")[-1].lower()
+
+
+def validar_archivo_subido(uploaded_file):
+
+    if uploaded_file is None:
+        return False, "No se subió archivo"
+
+    ext = obtener_extension_archivo(uploaded_file.name)
+
+    if ext not in VALID_FILE_EXTENSIONS:
+        return (
+            False,
+            "Formato no válido. Usa CSV, XLSX, XLS o TXT",
+        )
+
+    return True, "OK"
+
+
+# =========================================================
+# LEER ARCHIVOS
+# =========================================================
+
+def leer_csv(uploaded_file):
+    try:
+        return pd.read_csv(uploaded_file)
+    except:
+        return pd.read_csv(
+            uploaded_file,
+            sep=";",
+            encoding="latin-1",
+        )
+
+
+def leer_excel(uploaded_file):
+    return pd.read_excel(uploaded_file)
+
+
+def leer_txt(uploaded_file):
+    try:
+        return pd.read_csv(
+            uploaded_file,
+            delim_whitespace=True,
+            header=None,
+        )
+    except:
+        return pd.read_csv(
+            uploaded_file,
+            sep=";",
+            header=None,
+        )
+
+
+def leer_archivo(uploaded_file):
+
+    valido, mensaje = validar_archivo_subido(uploaded_file)
+
+    if not valido:
+        raise Exception(mensaje)
+
+    ext = obtener_extension_archivo(uploaded_file.name)
+
+    if ext == "csv":
+        return leer_csv(uploaded_file)
+
+    if ext in ["xlsx", "xls"]:
+        return leer_excel(uploaded_file)
+
+    if ext == "txt":
+        return leer_txt(uploaded_file)
+
+    raise Exception("Formato no soportado")
+
+
+# =========================================================
+# VALIDAR DATAFRAME
+# =========================================================
+
+def validar_dataframe(df):
+
+    if df is None:
+        return False, "DataFrame vacío"
+
+    if df.empty:
+        return False, "El archivo no contiene datos"
+
+    if len(df.columns) == 0:
+        return False, "No se detectaron columnas"
+
+    return True, "OK"
+
+
+# =========================================================
+# NORMALIZAR COLUMNAS
+# =========================================================
+
+def normalize_column_name(name):
+
+    name = normalizar_texto(name)
+
+    name = name.upper()
+
+    name = (
+        name.replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+    )
+
+    name = re.sub(r"[^A-Z0-9]", "", name)
+
+    return name
+
+
+def obtener_columnas_normalizadas(df):
+
+    mapping = {}
+
+    for col in df.columns:
+        mapping[col] = normalize_column_name(col)
+
+    return mapping
+
+
+# =========================================================
+# DETECCIÓN AUTOMÁTICA
+# =========================================================
+
+AUTO_COLUMN_PATTERNS = {
+    "PUNTO": [
+        "PUNTO",
+        "ID",
+        "PTO",
+        "POINT",
+        "NOMBRE",
+    ],
+    "ESTE": [
+        "ESTE",
+        "EAST",
+        "X",
+    ],
+    "NORTE": [
+        "NORTE",
+        "NORTH",
+        "Y",
+    ],
+    "LAT": [
+        "LAT",
+        "LATITUD",
+        "LATITUDE",
+    ],
+    "LON": [
+        "LON",
+        "LONGITUD",
+        "LONGITUDE",
+    ],
+    "Z": [
+        "Z",
+        "COTA",
+        "ELEVACION",
+        "ELEV",
+        "ALTURA",
+    ],
+    "DESCRIPCION": [
+        "DESCRIPCION",
+        "DESC",
+        "OBS",
+        "DETALLE",
+    ],
+}
+
+
+def detectar_columnas_automaticamente(df):
+
+    detected = {}
+
+    normalized = obtener_columnas_normalizadas(df)
+
+    for original_col, normalized_col in normalized.items():
+
+        for target, patterns in AUTO_COLUMN_PATTERNS.items():
+
+            for pattern in patterns:
+
+                if pattern in normalized_col:
+
+                    if target not in detected:
+                        detected[target] = original_col
+
+    return detected
+
+
+# =========================================================
+# COLUMNAS EXCEL A/B/C
+# =========================================================
+
+def convertir_columnas_excel(df):
+
+    nuevas = []
+
+    for i in range(len(df.columns)):
+        nuevas.append(letras_excel(i))
+
+    df.columns = nuevas
+
+    return df
+
+
+# =========================================================
+# MAPEO MANUAL
+# =========================================================
+
+def obtener_mapeo_columnas(
+    df,
+    tiene_encabezado=True,
+    incluir_z=False,
+    incluir_desc=False,
+):
+
+    columnas = list(df.columns)
+
+    detected = {}
+
+    if tiene_encabezado:
+        detected = detectar_columnas_automaticamente(df)
+
+    st.markdown("### Configuración de columnas")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        punto_col = st.selectbox(
+            "PUNTO",
+            columnas,
+            index=(
+                columnas.index(detected["PUNTO"])
+                if "PUNTO" in detected
+                else 0
+            ),
+        )
+
+    with col2:
+        este_col = st.selectbox(
+            "ESTE / LAT",
+            columnas,
+            index=(
+                columnas.index(detected["ESTE"])
+                if "ESTE" in detected
+                else 0
+            ),
+        )
+
+    with col3:
+        norte_col = st.selectbox(
+            "NORTE / LON",
+            columnas,
+            index=(
+                columnas.index(detected["NORTE"])
+                if "NORTE" in detected
+                else 0
+            ),
+        )
+
+    z_col = None
+    desc_col = None
+
+    if incluir_z:
+
+        z_col = st.selectbox(
+            "Z / Elevación",
+            columnas,
+            index=(
+                columnas.index(detected["Z"])
+                if "Z" in detected
+                else 0
+            ),
+        )
+
+    if incluir_desc:
+
+        desc_col = st.selectbox(
+            "Descripción",
+            columnas,
+            index=(
+                columnas.index(detected["DESCRIPCION"])
+                if "DESCRIPCION" in detected
+                else 0
+            ),
+        )
+
+    return {
+        "PUNTO": punto_col,
+        "ESTE": este_col,
+        "NORTE": norte_col,
+        "Z": z_col,
+        "DESCRIPCION": desc_col,
+    }
+
+
+# =========================================================
+# VALIDAR COORDENADAS
+# =========================================================
+
+def validar_utm(este, norte):
+
+    este = limpiar_numero(este)
+    norte = limpiar_numero(norte)
+
+    if np.isnan(este):
+        return False
+
+    if np.isnan(norte):
+        return False
+
+    if este < 100000 or este > 900000:
+        return False
+
+    if norte < 1000000 or norte > 10000000:
+        return False
+
+    return True
+
+
+def validar_latlon(lat, lon):
+
+    lat = limpiar_numero(lat)
+    lon = limpiar_numero(lon)
+
+    if np.isnan(lat):
+        return False
+
+    if np.isnan(lon):
+        return False
+
+    if lat < -90 or lat > 90:
+        return False
+
+    if lon < -180 or lon > 180:
+        return False
+
+    return True
+
+
+# =========================================================
+# VALIDAR DATUM Y ZONA
+# =========================================================
+
+def validar_datum(datum):
+
+    valid = [
+        "PSAD56",
+        "WGS84",
+    ]
+
+    return datum in valid
+
+
+def validar_zona(zona):
+    return zona in VALID_ZONES
+
+
+# =========================================================
+# CREAR DATAFRAME NORMALIZADO
+# =========================================================
+
+def construir_dataframe_base(
+    df_original,
+    mapping,
+    input_type="UTM",
+):
+
+    rows = []
+
+    for idx, row in df_original.iterrows():
+
         try:
-            if es_masivo:
-                kml_str = generar_kml_masivo(datos_a_exportar)
-                nombre_kml = f"SP_Masivo_{datetime.now().strftime('%d%m_%H%M')}.kml"
+
+            punto = sanitizar_texto(
+                row[mapping["PUNTO"]]
+            )
+
+            valor1 = row[mapping["ESTE"]]
+            valor2 = row[mapping["NORTE"]]
+
+            z = np.nan
+            desc = ""
+
+            if mapping.get("Z"):
+                z = limpiar_numero(
+                    row[mapping["Z"]]
+                )
+
+            if mapping.get("DESCRIPCION"):
+                desc = sanitizar_texto(
+                    row[mapping["DESCRIPCION"]]
+                )
+
+            if input_type == "UTM":
+
+                rows.append(
+                    {
+                        "PUNTO": punto,
+                        "ESTE": limpiar_numero(valor1),
+                        "NORTE": limpiar_numero(valor2),
+                        "LAT": np.nan,
+                        "LON": np.nan,
+                        "Z": z,
+                        "DESCRIPCION": desc,
+                        "ERROR": "",
+                    }
+                )
+
             else:
-                kml_str = generar_kml(datos[2], datos[3]) 
-                nombre_kml = f"SP_Punto_{datetime.now().strftime('%H%M')}.kml"
-            
+
+                rows.append(
+                    {
+                        "PUNTO": punto,
+                        "ESTE": np.nan,
+                        "NORTE": np.nan,
+                        "LAT": limpiar_numero(valor1),
+                        "LON": limpiar_numero(valor2),
+                        "Z": z,
+                        "DESCRIPCION": desc,
+                        "ERROR": "",
+                    }
+                )
+
+        except Exception as e:
+
+            rows.append(
+                {
+                    "PUNTO": "",
+                    "ESTE": np.nan,
+                    "NORTE": np.nan,
+                    "LAT": np.nan,
+                    "LON": np.nan,
+                    "Z": np.nan,
+                    "DESCRIPCION": "",
+                    "ERROR": str(e),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+# =========================================================
+# PREVIEW
+# =========================================================
+
+def render_preview_dataframe(df, titulo="Preview"):
+
+    st.markdown(f"### {titulo}")
+
+    if df is None or df.empty:
+        st.warning("No hay datos")
+        return
+
+    st.dataframe(
+        df.head(MAX_PREVIEW_ROWS),
+        use_container_width=True,
+        height=400,
+    )
+
+    if len(df) > MAX_PREVIEW_ROWS:
+        st.caption(
+            f"Mostrando {MAX_PREVIEW_ROWS} de {len(df)} filas"
+        )
+
+
+# =========================================================
+# ERRORES
+# =========================================================
+
+def render_errores(df):
+
+    if df is None:
+        return
+
+    if "ERROR" not in df.columns:
+        return
+
+    errores = df[
+        df["ERROR"].astype(str).str.strip() != ""
+    ]
+
+    if errores.empty:
+        st.success("Sin errores detectados")
+        return
+
+    st.warning(
+        f"{len(errores)} filas tuvieron errores"
+    )
+
+    with st.expander("Ver errores"):
+
+        st.dataframe(
+            errores,
+            use_container_width=True,
+        )
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 4
+# Motor geoespacial y conversiones
+# =========================================================
+
+
+# =========================================================
+# EPSG PERÚ
+# =========================================================
+
+EPSG_CONFIG = {
+
+    "PSAD56": {
+        "17S": 24877,
+        "18S": 24878,
+        "19S": 24879,
+    },
+
+    "WGS84": {
+        "17S": 32717,
+        "18S": 32718,
+        "19S": 32719,
+    },
+}
+
+
+# =========================================================
+# OBTENER TRANSFORMADOR
+# =========================================================
+
+@st.cache_resource
+def get_transformer(
+    source_datum,
+    source_zone,
+    target_datum,
+    target_zone,
+):
+
+    source_epsg = EPSG_CONFIG[source_datum][source_zone]
+    target_epsg = EPSG_CONFIG[target_datum][target_zone]
+
+    transformer = pyproj.Transformer.from_crs(
+        f"EPSG:{source_epsg}",
+        f"EPSG:{target_epsg}",
+        always_xy=True,
+    )
+
+    return transformer
+
+
+@st.cache_resource
+def get_transformer_to_geo(
+    source_datum,
+    source_zone,
+):
+
+    source_epsg = EPSG_CONFIG[source_datum][source_zone]
+
+    transformer = pyproj.Transformer.from_crs(
+        f"EPSG:{source_epsg}",
+        "EPSG:4326",
+        always_xy=True,
+    )
+
+    return transformer
+
+
+@st.cache_resource
+def get_transformer_from_geo(
+    target_datum,
+    target_zone,
+):
+
+    target_epsg = EPSG_CONFIG[target_datum][target_zone]
+
+    transformer = pyproj.Transformer.from_crs(
+        "EPSG:4326",
+        f"EPSG:{target_epsg}",
+        always_xy=True,
+    )
+
+    return transformer
+
+
+# =========================================================
+# CONVERSIONES
+# =========================================================
+
+def convertir_utm_a_utm(
+    este,
+    norte,
+    source_datum,
+    source_zone,
+    target_datum,
+    target_zone,
+):
+
+    transformer = get_transformer(
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    )
+
+    x, y = transformer.transform(
+        float(este),
+        float(norte),
+    )
+
+    return x, y
+
+
+def convertir_utm_a_geo(
+    este,
+    norte,
+    source_datum,
+    source_zone,
+):
+
+    transformer = get_transformer_to_geo(
+        source_datum,
+        source_zone,
+    )
+
+    lon, lat = transformer.transform(
+        float(este),
+        float(norte),
+    )
+
+    return lat, lon
+
+
+def convertir_geo_a_utm(
+    lat,
+    lon,
+    target_datum,
+    target_zone,
+):
+
+    transformer = get_transformer_from_geo(
+        target_datum,
+        target_zone,
+    )
+
+    x, y = transformer.transform(
+        float(lon),
+        float(lat),
+    )
+
+    return x, y
+
+
+# =========================================================
+# FORMATEADORES
+# =========================================================
+
+def fmt_coord(value, decimals=3):
+
+    try:
+        if pd.isna(value):
+            return ""
+        return f"{float(value):,.{decimals}f}"
+
+    except:
+        return ""
+
+
+def fmt_latlon(value, decimals=8):
+
+    try:
+        if pd.isna(value):
+            return ""
+        return f"{float(value):.{decimals}f}"
+
+    except:
+        return ""
+
+
+# =========================================================
+# PROCESAR FILA UTM
+# =========================================================
+
+def procesar_fila_utm_conversion(
+    row,
+    source_datum,
+    source_zone,
+    target_datum,
+    target_zone,
+):
+
+    try:
+
+        este = limpiar_numero(row["ESTE"])
+        norte = limpiar_numero(row["NORTE"])
+
+        if not validar_utm(este, norte):
+
+            row["ERROR"] = "UTM inválido"
+            return row
+
+        nuevo_este, nuevo_norte = convertir_utm_a_utm(
+            este,
+            norte,
+            source_datum,
+            source_zone,
+            target_datum,
+            target_zone,
+        )
+
+        lat, lon = convertir_utm_a_geo(
+            nuevo_este,
+            nuevo_norte,
+            target_datum,
+            target_zone,
+        )
+
+        row["ESTE"] = nuevo_este
+        row["NORTE"] = nuevo_norte
+        row["LAT"] = lat
+        row["LON"] = lon
+        row["ERROR"] = ""
+
+        return row
+
+    except Exception as e:
+
+        row["ERROR"] = str(e)
+        return row
+
+
+def procesar_fila_utm_ubicacion(
+    row,
+    datum,
+    zone,
+):
+
+    try:
+
+        este = limpiar_numero(row["ESTE"])
+        norte = limpiar_numero(row["NORTE"])
+
+        if not validar_utm(este, norte):
+
+            row["ERROR"] = "UTM inválido"
+            return row
+
+        lat, lon = convertir_utm_a_geo(
+            este,
+            norte,
+            datum,
+            zone,
+        )
+
+        row["LAT"] = lat
+        row["LON"] = lon
+        row["ERROR"] = ""
+
+        return row
+
+    except Exception as e:
+
+        row["ERROR"] = str(e)
+        return row
+
+
+# =========================================================
+# PROCESAR FILA GEO
+# =========================================================
+
+def procesar_fila_geo_conversion(
+    row,
+    target_datum,
+    target_zone,
+):
+
+    try:
+
+        lat = limpiar_numero(row["LAT"])
+        lon = limpiar_numero(row["LON"])
+
+        if not validar_latlon(lat, lon):
+
+            row["ERROR"] = "Lat/Lon inválidos"
+            return row
+
+        este, norte = convertir_geo_a_utm(
+            lat,
+            lon,
+            target_datum,
+            target_zone,
+        )
+
+        row["ESTE"] = este
+        row["NORTE"] = norte
+        row["ERROR"] = ""
+
+        return row
+
+    except Exception as e:
+
+        row["ERROR"] = str(e)
+        return row
+
+
+def procesar_fila_geo_ubicacion(
+    row,
+):
+
+    try:
+
+        lat = limpiar_numero(row["LAT"])
+        lon = limpiar_numero(row["LON"])
+
+        if not validar_latlon(lat, lon):
+
+            row["ERROR"] = "Lat/Lon inválidos"
+            return row
+
+        row["ERROR"] = ""
+
+        return row
+
+    except Exception as e:
+
+        row["ERROR"] = str(e)
+        return row
+
+
+# =========================================================
+# MOTOR PRINCIPAL
+# =========================================================
+
+def ejecutar_conversion_masiva(
+    df,
+    input_type,
+    source_datum,
+    source_zone,
+    target_datum,
+    target_zone,
+):
+
+    resultados = []
+
+    for _, row in df.iterrows():
+
+        row = row.copy()
+
+        if input_type == "UTM":
+
+            row = procesar_fila_utm_conversion(
+                row,
+                source_datum,
+                source_zone,
+                target_datum,
+                target_zone,
+            )
+
+        else:
+
+            row = procesar_fila_geo_conversion(
+                row,
+                target_datum,
+                target_zone,
+            )
+
+        resultados.append(row)
+
+    return pd.DataFrame(resultados)
+
+
+def ejecutar_ubicacion_masiva(
+    df,
+    input_type,
+    datum,
+    zone,
+):
+
+    resultados = []
+
+    for _, row in df.iterrows():
+
+        row = row.copy()
+
+        if input_type == "UTM":
+
+            row = procesar_fila_utm_ubicacion(
+                row,
+                datum,
+                zone,
+            )
+
+        else:
+
+            row = procesar_fila_geo_ubicacion(
+                row,
+            )
+
+        resultados.append(row)
+
+    return pd.DataFrame(resultados)
+
+
+# =========================================================
+# ESTADÍSTICAS
+# =========================================================
+
+def obtener_estadisticas(df):
+
+    if df is None or df.empty:
+
+        return {
+            "total": 0,
+            "ok": 0,
+            "errores": 0,
+        }
+
+    total = len(df)
+
+    errores = len(
+        df[
+            df["ERROR"].astype(str).str.strip() != ""
+        ]
+    )
+
+    ok = total - errores
+
+    return {
+        "total": total,
+        "ok": ok,
+        "errores": errores,
+    }
+
+
+def render_estadisticas(df):
+
+    stats = obtener_estadisticas(df)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Total",
+            stats["total"],
+        )
+
+    with col2:
+        st.metric(
+            "Correctos",
+            stats["ok"],
+        )
+
+    with col3:
+        st.metric(
+            "Errores",
+            stats["errores"],
+        )
+
+
+# =========================================================
+# RESULTADO MANUAL
+# =========================================================
+
+def render_resultado_manual(df):
+
+    if df is None or df.empty:
+        return
+
+    row = df.iloc[0]
+
+    st.markdown(
+        """
+        <div class='card-res'>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.markdown("### Coordenadas")
+
+        st.write(
+            f"**PUNTO:** {row['PUNTO']}"
+        )
+
+        st.write(
+            f"**ESTE:** {fmt_coord(row['ESTE'])}"
+        )
+
+        st.write(
+            f"**NORTE:** {fmt_coord(row['NORTE'])}"
+        )
+
+        if not pd.isna(row["Z"]):
+
+            st.write(
+                f"**Z:** {fmt_coord(row['Z'])}"
+            )
+
+    with col2:
+
+        st.markdown("### Geográficas")
+
+        st.write(
+            f"**LAT:** {fmt_latlon(row['LAT'])}"
+        )
+
+        st.write(
+            f"**LON:** {fmt_latlon(row['LON'])}"
+        )
+
+        if row["DESCRIPCION"]:
+
+            st.write(
+                f"**DESC:** {row['DESCRIPCION']}"
+            )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# RESUMEN
+# =========================================================
+
+def render_resumen_proceso(df):
+
+    stats = obtener_estadisticas(df)
+
+    st.success(
+        f"Procesados: {stats['ok']} | "
+        f"Errores: {stats['errores']}"
+    )
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 5
+# Mapas, visualización y preview geográfico
+# =========================================================
+
+
+# =========================================================
+# ICONOS MAPA
+# =========================================================
+
+MAP_COLORS = {
+    "ok": "blue",
+    "error": "red",
+    "single": "green",
+}
+
+
+# =========================================================
+# CENTRO MAPA
+# =========================================================
+
+def calcular_centro_mapa(df):
+
+    if df is None or df.empty:
+        return -9.189967, -75.015152
+
+    validos = df[
+        (df["LAT"].notna()) &
+        (df["LON"].notna())
+    ]
+
+    if validos.empty:
+        return -9.189967, -75.015152
+
+    lat = validos["LAT"].mean()
+    lon = validos["LON"].mean()
+
+    return lat, lon
+
+
+# =========================================================
+# TOOLTIP
+# =========================================================
+
+def construir_tooltip(row):
+
+    texto = f"""
+    <b>PUNTO:</b> {row['PUNTO']}<br>
+    <b>ESTE:</b> {fmt_coord(row['ESTE'])}<br>
+    <b>NORTE:</b> {fmt_coord(row['NORTE'])}<br>
+    <b>LAT:</b> {fmt_latlon(row['LAT'])}<br>
+    <b>LON:</b> {fmt_latlon(row['LON'])}<br>
+    """
+
+    if not pd.isna(row["Z"]):
+
+        texto += f"""
+        <b>Z:</b> {fmt_coord(row['Z'])}<br>
+        """
+
+    if row["DESCRIPCION"]:
+
+        texto += f"""
+        <b>DESC:</b> {row['DESCRIPCION']}<br>
+        """
+
+    if row["ERROR"]:
+
+        texto += f"""
+        <b>ERROR:</b> {row['ERROR']}<br>
+        """
+
+    return texto
+
+
+# =========================================================
+# MAPA BASE
+# =========================================================
+
+def crear_mapa_base(df):
+
+    lat, lon = calcular_centro_mapa(df)
+
+    mapa = folium.Map(
+        location=[lat, lon],
+        zoom_start=15,
+        control_scale=True,
+        tiles="OpenStreetMap",
+    )
+
+    return mapa
+
+
+# =========================================================
+# AGREGAR PUNTO
+# =========================================================
+
+def agregar_marker(
+    mapa,
+    row,
+    color="blue",
+):
+
+    if pd.isna(row["LAT"]):
+        return
+
+    if pd.isna(row["LON"]):
+        return
+
+    popup = construir_tooltip(row)
+
+    folium.Marker(
+        location=[
+            row["LAT"],
+            row["LON"],
+        ],
+        popup=popup,
+        tooltip=row["PUNTO"],
+        icon=folium.Icon(
+            color=color,
+            icon="map-marker",
+            prefix="fa",
+        ),
+    ).add_to(mapa)
+
+
+# =========================================================
+# MAPA MANUAL
+# =========================================================
+
+def render_mapa_manual(df):
+
+    if df is None or df.empty:
+        return
+
+    mapa = crear_mapa_base(df)
+
+    row = df.iloc[0]
+
+    color = (
+        MAP_COLORS["single"]
+        if row["ERROR"] == ""
+        else MAP_COLORS["error"]
+    )
+
+    agregar_marker(
+        mapa,
+        row,
+        color=color,
+    )
+
+    st.markdown("### Ubicación en mapa")
+
+    folium_static(
+        mapa,
+        width=1400,
+        height=500,
+    )
+
+
+# =========================================================
+# MAPA MASIVO
+# =========================================================
+
+def render_mapa_masivo(df):
+
+    if df is None or df.empty:
+        return
+
+    validos = df[
+        (df["LAT"].notna()) &
+        (df["LON"].notna())
+    ]
+
+    if validos.empty:
+
+        st.warning(
+            "No hay coordenadas válidas para mostrar"
+        )
+
+        return
+
+    mapa = crear_mapa_base(validos)
+
+    for _, row in validos.iterrows():
+
+        color = (
+            MAP_COLORS["ok"]
+            if row["ERROR"] == ""
+            else MAP_COLORS["error"]
+        )
+
+        agregar_marker(
+            mapa,
+            row,
+            color=color,
+        )
+
+    st.markdown("### Mapa de puntos")
+
+    folium_static(
+        mapa,
+        width=1400,
+        height=600,
+    )
+
+
+# =========================================================
+# PREVIEW RESULTADO
+# =========================================================
+
+def render_preview_resultado(df):
+
+    if df is None or df.empty:
+        return
+
+    columnas_preview = [
+        "PUNTO",
+        "ESTE",
+        "NORTE",
+        "LAT",
+        "LON",
+        "Z",
+        "DESCRIPCION",
+        "ERROR",
+    ]
+
+    preview = df.copy()
+
+    for col in ["ESTE", "NORTE", "Z"]:
+
+        if col in preview.columns:
+
+            preview[col] = preview[col].apply(
+                lambda x: fmt_coord(x)
+            )
+
+    for col in ["LAT", "LON"]:
+
+        if col in preview.columns:
+
+            preview[col] = preview[col].apply(
+                lambda x: fmt_latlon(x)
+            )
+
+    st.markdown("### Resultado procesado")
+
+    st.dataframe(
+        preview[columnas_preview],
+        use_container_width=True,
+        height=500,
+    )
+
+
+# =========================================================
+# PANEL RESUMEN
+# =========================================================
+
+def render_panel_resumen(df):
+
+    stats = obtener_estadisticas(df)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.markdown(
+            """
+            <div class='card-res'>
+            <h3>Total</h3>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.metric(
+            "",
+            stats["total"],
+        )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+
+        st.markdown(
+            """
+            <div class='card-res'>
+            <h3>Correctos</h3>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.metric(
+            "",
+            stats["ok"],
+        )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    with col3:
+
+        st.markdown(
+            """
+            <div class='card-res'>
+            <h3>Errores</h3>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.metric(
+            "",
+            stats["errores"],
+        )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+# =========================================================
+# TABS RESULTADOS
+# =========================================================
+
+def render_tabs_resultados(df, modo="manual"):
+
+    if df is None or df.empty:
+        return
+
+    tab1, tab2, tab3 = st.tabs([
+        "Preview",
+        "Mapa",
+        "Errores",
+    ])
+
+    with tab1:
+
+        render_panel_resumen(df)
+
+        render_preview_resultado(df)
+
+    with tab2:
+
+        if modo == "manual":
+            render_mapa_manual(df)
+        else:
+            render_mapa_masivo(df)
+
+    with tab3:
+
+        render_errores(df)
+
+
+# =========================================================
+# FILTRAR VÁLIDOS
+# =========================================================
+
+def obtener_df_validos(df):
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    return df[
+        df["ERROR"].astype(str).str.strip() == ""
+    ].copy()
+
+
+# =========================================================
+# FILTRAR ERRORES
+# =========================================================
+
+def obtener_df_errores(df):
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    return df[
+        df["ERROR"].astype(str).str.strip() != ""
+    ].copy()
+
+
+# =========================================================
+# CONTADORES
+# =========================================================
+
+def total_validos(df):
+
+    return len(
+        obtener_df_validos(df)
+    )
+
+
+def total_errores(df):
+
+    return len(
+        obtener_df_errores(df)
+    )
+
+
+# =========================================================
+# ALERTAS UX
+# =========================================================
+
+def render_alertas_proceso(df):
+
+    ok = total_validos(df)
+    err = total_errores(df)
+
+    if ok > 0:
+
+        st.success(
+            f"Se procesaron correctamente {ok} puntos"
+        )
+
+    if err > 0:
+
+        st.warning(
+            f"{err} filas tuvieron errores"
+        )
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 6
+# Exportaciones CSV, Excel, KML y DXF
+# =========================================================
+
+
+# =========================================================
+# DATAFRAME EXPORTABLE
+# =========================================================
+
+def preparar_dataframe_exportacion(df):
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    export_df = obtener_df_validos(df)
+
+    if export_df.empty:
+        return pd.DataFrame()
+
+    export_df = export_df.copy()
+
+    columnas = [
+        "PUNTO",
+        "ESTE",
+        "NORTE",
+        "LAT",
+        "LON",
+        "Z",
+        "DESCRIPCION",
+    ]
+
+    for col in columnas:
+
+        if col not in export_df.columns:
+
+            export_df[col] = ""
+
+    return export_df[columnas]
+
+
+# =========================================================
+# CSV
+# =========================================================
+
+def generar_csv_bytes(df):
+
+    export_df = preparar_dataframe_exportacion(df)
+
+    if export_df.empty:
+        return None
+
+    csv_bytes = export_df.to_csv(
+        index=False,
+        encoding="utf-8-sig",
+    ).encode("utf-8-sig")
+
+    return csv_bytes
+
+
+# =========================================================
+# EXCEL
+# =========================================================
+
+def generar_excel_bytes(df):
+
+    export_df = preparar_dataframe_exportacion(df)
+
+    if export_df.empty:
+        return None
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="xlsxwriter",
+    ) as writer:
+
+        export_df.to_excel(
+            writer,
+            index=False,
+            sheet_name="RESULTADOS",
+        )
+
+        workbook = writer.book
+        worksheet = writer.sheets["RESULTADOS"]
+
+        format_header = workbook.add_format({
+            "bold": True,
+            "bg_color": "#0A3D62",
+            "font_color": "white",
+            "border": 1,
+        })
+
+        for col_num, value in enumerate(export_df.columns.values):
+
+            worksheet.write(
+                0,
+                col_num,
+                value,
+                format_header,
+            )
+
+            worksheet.set_column(
+                col_num,
+                col_num,
+                20,
+            )
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# =========================================================
+# KML
+# =========================================================
+
+def generar_kml(df):
+
+    export_df = preparar_dataframe_exportacion(df)
+
+    if export_df.empty:
+        return None
+
+    kml = []
+
+    kml.append(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+    )
+
+    kml.append(
+        '<kml xmlns="http://www.opengis.net/kml/2.2">'
+    )
+
+    kml.append("<Document>")
+
+    kml.append(
+        f"<name>{APP_NAME}</name>"
+    )
+
+    for _, row in export_df.iterrows():
+
+        lat = row["LAT"]
+        lon = row["LON"]
+
+        if pd.isna(lat):
+            continue
+
+        if pd.isna(lon):
+            continue
+
+        nombre = sanitizar_texto(
+            row["PUNTO"]
+        )
+
+        descripcion = sanitizar_texto(
+            row["DESCRIPCION"]
+        )
+
+        z = row["Z"]
+
+        kml.append("<Placemark>")
+
+        kml.append(
+            f"<name>{nombre}</name>"
+        )
+
+        desc_text = f"""
+        ESTE: {fmt_coord(row['ESTE'])}
+        NORTE: {fmt_coord(row['NORTE'])}
+        """
+
+        if not pd.isna(z):
+
+            desc_text += f"""
+            Z: {fmt_coord(z)}
+            """
+
+        if descripcion:
+
+            desc_text += f"""
+            DESC: {descripcion}
+            """
+
+        kml.append(
+            f"<description><![CDATA[{desc_text}]]></description>"
+        )
+
+        kml.append("<Point>")
+
+        kml.append(
+            f"<coordinates>{lon},{lat},0</coordinates>"
+        )
+
+        kml.append("</Point>")
+
+        kml.append("</Placemark>")
+
+    kml.append("</Document>")
+    kml.append("</kml>")
+
+    return "\n".join(kml).encode("utf-8")
+
+
+# =========================================================
+# DXF
+# =========================================================
+
+def generar_dxf(df):
+
+    export_df = preparar_dataframe_exportacion(df)
+
+    if export_df.empty:
+        return None
+
+    doc = ezdxf.new("R2010")
+
+    msp = doc.modelspace()
+
+    if "PUNTOS" not in doc.layers:
+        doc.layers.new(
+            name="PUNTOS",
+            dxfattribs={"color": 1},
+        )
+
+    if "TEXTOS" not in doc.layers:
+        doc.layers.new(
+            name="TEXTOS",
+            dxfattribs={"color": 5},
+        )
+
+    for _, row in export_df.iterrows():
+
+        este = limpiar_numero(
+            row["ESTE"]
+        )
+
+        norte = limpiar_numero(
+            row["NORTE"]
+        )
+
+        z = limpiar_numero(
+            row["Z"]
+        )
+
+        if pd.isna(z):
+            z = 0
+
+        nombre = sanitizar_texto(
+            row["PUNTO"]
+        )
+
+        descripcion = sanitizar_texto(
+            row["DESCRIPCION"]
+        )
+
+        texto = nombre
+
+        if descripcion:
+
+            texto += f" - {descripcion}"
+
+        punto = (
+            este,
+            norte,
+            z,
+        )
+
+        msp.add_point(
+            punto,
+            dxfattribs={
+                "layer": "PUNTOS",
+            },
+        )
+
+        msp.add_text(
+            texto,
+            dxfattribs={
+                "height": 1.8,
+                "layer": "TEXTOS",
+            },
+        ).set_placement(
+            (
+                este + 1,
+                norte + 1,
+                z,
+            )
+        )
+
+    output = io.BytesIO()
+
+    doc.write(output)
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# =========================================================
+# VALIDAR EXPORTACIÓN
+# =========================================================
+
+def validar_exportacion(df):
+
+    if df is None:
+        return False
+
+    if df.empty:
+        return False
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+        return False
+
+    return True
+
+
+# =========================================================
+# GASTAR CRÉDITO
+# =========================================================
+
+def consumir_credito_exportacion():
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    creditos = int(
+        st.session_state.credits_free
+    )
+
+    if creditos <= 0:
+
+        mostrar_mensaje(
+            "No tienes créditos disponibles",
+            "warning",
+        )
+
+        return False
+
+    nuevos = creditos - 1
+
+    actualizar_usuario(
+        st.session_state.user_id,
+        {
+            "creditos_disponibles": nuevos,
+        },
+    )
+
+    st.session_state.credits_free = nuevos
+
+    return True
+
+
+# =========================================================
+# BOTONES EXPORTACIÓN
+# =========================================================
+
+def render_exportaciones(df):
+
+    if not validar_exportacion(df):
+
+        st.warning(
+            "No hay datos válidos para exportar"
+        )
+
+        return
+
+    st.markdown("## Exportar resultados")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    nombre_base = "SP_Topo_Convert"
+
+    # CSV
+    with col1:
+
+        csv_data = generar_csv_bytes(df)
+
+        if csv_data is not None:
+
+            st.download_button(
+                label="📄 Descargar CSV",
+                data=csv_data,
+                file_name=generar_nombre_archivo(
+                    nombre_base,
+                    "csv",
+                ),
+                mime="text/csv",
+                use_container_width=True,
+                on_click=consumir_credito_exportacion,
+            )
+
+    # EXCEL
+    with col2:
+
+        excel_data = generar_excel_bytes(df)
+
+        if excel_data is not None:
+
+            st.download_button(
+                label="📊 Descargar Excel",
+                data=excel_data,
+                file_name=generar_nombre_archivo(
+                    nombre_base,
+                    "xlsx",
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-"
+                    "officedocument.spreadsheetml.sheet"
+                ),
+                use_container_width=True,
+                on_click=consumir_credito_exportacion,
+            )
+
+    # KML
+    with col3:
+
+        kml_data = generar_kml(df)
+
+        if kml_data is not None:
+
             st.download_button(
                 label="🌍 Descargar KML",
-                data=kml_str,
-                file_name=nombre_kml,
+                data=kml_data,
+                file_name=generar_nombre_archivo(
+                    nombre_base,
+                    "kml",
+                ),
                 mime="application/vnd.google-earth.kml+xml",
                 use_container_width=True,
-                key=f"btn_kml_{'masivo' if es_masivo else 'ind'}"
+                on_click=consumir_credito_exportacion,
             )
-        except Exception as e:
-            st.error(f"Error KML: {e}")
 
-    # --- SUB-BLOQUE: DXF (AutoCAD) - AHORA ABIERTO ---
-    with col_cad:
-        try:
-            if es_masivo:
-                dxf_data = exportar_cad(
-                    datos_a_exportar, 'PUNTO', 'ESTE', 'NORTE',
-                    col_z='Z_CAD' if 'Z_CAD' in datos_a_exportar else None, 
-                    col_c='DESC_CAD' if 'DESC_CAD' in datos_a_exportar else None
-                )   
-            else:
-                df_ind = pd.DataFrame([{'PUNTO': 'P-01', 'ESTE': datos[0], 'NORTE': datos[1]}])
-                dxf_data = exportar_cad(df_ind, 'PUNTO', 'ESTE', 'NORTE')
+    # DXF
+    with col4:
 
-            if dxf_data:
-                st.download_button(
-                    label="📐 Descargar DXF (AutoCAD)",
-                    data=dxf_data,
-                    file_name=f"SP_Plano_{datetime.now().strftime('%d%m_%H%M')}.dxf",
-                    mime="application/dxf",
-                    use_container_width=True,
-                    key=f"btn_dxf_{'masivo' if es_masivo else 'ind'}",
-                    type="primary" if not es_premium else "secondary"
-                )
-        except Exception as e:
-            st.error(f"Error CAD: {e}")
+        dxf_data = generar_dxf(df)
 
-    # Mensaje de marketing sutil corregido
-    if not es_premium:
-        msg_limite = "500" if es_pase else "10"
-        st.markdown(f"""
-            <div style="text-align: center; margin-top: 10px;">
-                <small>¿Necesitas procesar más de {LIMITE_GRATIS_DIARIO} puntos?
-                <a href="#" onclick="window.location.reload();"> VER PLANES PRO</a></small>
-            </div>
-        """, unsafe_allow_html=True)
+        if dxf_data is not None:
 
-# =========================================================
-# BLOQUE 7: SIDEBAR (IDENTIDAD CORPORATIVA)
-# =========================================================
-with st.sidebar:
-    # 1. LOGO Y TÍTULO
-    ruta_logo = "logo.png"
-    
-    if os.path.exists(ruta_logo):
-        # El margin-top: -50px sube el logo al tope del sidebar
-        st.markdown('<div style="margin-top: -50px;">', unsafe_allow_html=True)
-        st.image(ruta_logo, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.error(f"No se encontró el logo.")
-    
-    st.markdown(f"""
-        <div style="text-align: center; margin-top: -10px;">
-        <p style="font-size: 0.9em; color: #facc15; font-weight: bold;">
-            Innovación digital a tu medida
-        </p>
-    </div>
-        <hr style="border-color: rgba(250, 204, 21, 0.3); margin: 15px 0;">
-    """, unsafe_allow_html=True)
-
-    # 2. GUÍA RÁPIDA (En lugar de la publicidad repetida)
-    # Esto ayuda a que el usuario no se pierda y da un aspecto de "Herramienta Profesional"
-    st.markdown("""
-        <div style="padding: 10px; border-radius: 10px; background-color: rgba(255,255,255,0.05); margin-bottom: 20px;">
-        <p style="color: #facc15; font-weight: bold; font-size: 0.9em; margin-bottom: 5px;">📍 FLUJO DE TRABAJO</p>
-        <ol style="color: #e2e8f0; font-size: 0.75em; padding-left: 15px;">
-            <li><b>Configura:</b> Elige el sistema (PSAD56/WGS84) y tu zona UTM.</li>
-            <li><b>Procesa:</b> Ingresa datos manuales o sube un archivo Excel/CSV.</li>
-            <li><b>Visualiza:</b> Revisa la ubicación exacta en el mapa satelital.</li>
-            <li><b>Ingeniería:</b> Exporta en Excel, KML y/o DXF para AutoCAD y Google Earth.</li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 3. PUBLICIDAD ÚNICA Y MEJORADA
-    st.markdown("""
-        <div style="background: linear-gradient(145deg, #004d4d, #006666); 
-                    padding: 15px; border-radius: 12px; border: 2px solid #facc15;
-                    box-shadow: 0px 4px 15px rgba(0,0,0,0.3);">
-            <p style="color: #facc15; font-size: 0.75em; font-weight: bold; margin-bottom: 5px; letter-spacing: 1px;">ANUNCIO</p>
-            <p style="color: white; font-size: 0.95em; font-weight: bold; margin-bottom: 5px;">🚀 ¿Buscas una App o Web?</p>
-            <p style="color: #cbd5e1; font-size: 0.75em; margin-bottom: 12px; line-height: 1.3;">
-                Desarrollamos software profesional en <b>Nuevo Chimbote</b> para potenciar tu negocio.
-            </p>
-            <a href="https://wa.me/51924886915" target="_blank" 
-               style="display: block; background-color: #facc15; color: #000; 
-                      text-align: center; padding: 10px; border-radius: 8px; 
-                      text-decoration: none; font-weight: bold; font-size: 0.85em;
-                      transition: 0.3s;">
-               💬 ¡COTIZA AQUÍ!
-            </a>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # 4. FOOTER (Solo una vez)
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown(f"""
-        <div style="text-align: center; opacity: 0.6;">
-            <p style="font-size: 0.7em; color: white;">v1.2.5 | © 2026 JGZ<br>Ingeniería de Sistemas - UTP</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-# =========================================================
-# BLOQUE 8: VISTA PRINCIPAL - CONVERTIDOR (PARTE 1)
-# =========================================================
-
-# 1. NAVEGACIÓN SUPERIOR PROFESIONAL
-_, b1, b2, b3 = st.columns([1.5, 1.2, 1.2, 1.2])
-
-with b1:
-    if st.button("🌍 CONVERTIDOR", use_container_width=True, type="primary" if st.session_state.menu_actual == "CONVERTIDOR" else "secondary"):
-        st.session_state.menu_actual = "CONVERTIDOR"
-        st.rerun()
-with b2:
-    if st.button("💎 PLAN PRO", use_container_width=True, type="primary" if st.session_state.menu_actual == "PRO" else "secondary"):
-        st.session_state.menu_actual = "PRO"
-        st.rerun()
-with b3:
-    if st.button("📞 SOPORTE", use_container_width=True, type="primary" if st.session_state.menu_actual == "CONTACTO" else "secondary"):
-        st.session_state.menu_actual = "CONTACTO"
-        st.rerun()
-# --- NUEVO: BARRA DE ESTADO DE CRÉDITOS DINÁMICA ---
-es_pro_admin = st.session_state.get('es_pro', False) or st.session_state.get('es_admin', False)
-es_pase = st.session_state.get('es_pase_diario', False)
-
-st.write("") # Espaciador sutil
-
-if es_pro_admin:
-    st.success("🚀 **Plan PRO Activo:** Tienes acceso ilimitado a todas las herramientas.")
-elif es_pase:
-    creditos_restantes = max(0, LIMITE_FILAS_PASE_DIARIO - st.session_state.consultas)
-    st.info(f"🎫 **Pase Diario Activo:** Puedes convertir puntos de manera ilimitada (Manual) y masiva (Hasta {creditos_restantes} filas restantes).")
-else:
-    puntos_restantes = max(0, LIMITE_GRATIS_DIARIO - st.session_state.consultas)
-    if puntos_restantes > 0:
-        st.warning(f"💎 **Versión Gratuita:** Te quedan **{puntos_restantes}/{LIMITE_GRATIS_DIARIO}** créditos hoy.")
-    else:
-        st.error(f"❌ **Créditos agotados:** Has usado tus {LIMITE_GRATIS_DIARIO} créditos. Activa un pase para continuar hoy.")
-
-# 2. LÓGICA DEL CONVERTIDOR
-if st.session_state.menu_actual == "CONVERTIDOR":
-    st.markdown('<h1 style="margin-bottom: -10px;">SP TOPO-CONVERT 🌍</h1>', unsafe_allow_html=True)
-    st.markdown("""
-        <p style="opacity: 0.9; margin-bottom: 20px; font-size: 1.1em; line-height: 1.4;">
-            Esta plataforma ha sido diseñada para <b>convertir y ubicar puntos geográficos en todo el Perú</b> 
-            con precisión profesional. Permite procesar datos individuales o masivos y exportarlos directamente 
-            a formatos <b>KML (Google Earth)</b> e incluso <b>DXF para AutoCAD</b>.
-        </p>
-    """, unsafe_allow_html=True)
-
-    # Configuración de modo y zona UTM
-    opciones_modo = ["PSAD56 a WGS84 (Convertir)", "WGS84 a PSAD56 (Convertir)", "UBICAR PUNTO WGS84", "UBICAR PUNTO PSAD56"]
-    modo = st.selectbox("Acción a realizar:", opciones_modo)
-    zona_global = st.selectbox("Zona UTM:", ["17S", "18S", "19S"])
-    st.session_state.modo_seleccionado = modo 
-
-    # --- CONTROL DE CRÉDITOS Y BLOQUEOS ---
-    # Verificamos si el usuario tiene algún plan activo
-    es_limitado = not (st.session_state.get('es_pro', False) or 
-                   st.session_state.get('es_admin', False) or 
-                   st.session_state.get('es_pase_diario', False))
-    puntos_restantes = max(0, LIMITE_GRATIS_DIARIO - st.session_state.consultas)
-    bloqueo_total = es_limitado and puntos_restantes <= 0
-
-    # Creación de Pestañas
-    tab1, tab2 = st.tabs(["🎯 Individual", "📂 Masivo (Excel/CSV)"])
-
-    # --- TAB 1: CONVERSIÓN ÚNICA ---
-    with tab1:
-        c1, c2 = st.columns([1, 1.2], gap="large")
-    
-        with c1:
-            # Caso A: Usuario agotó sus créditos gratuitos
-            if bloqueo_total:
-                st.error(f"❌ Has agotado tus {LIMITE_GRATIS_DIARIO} créditos gratuitos de hoy.")
-                st.info("Para seguir procesando coordenadas, activa el Plan PRO o un Pase Diario.")
-                if st.button("🚀 ADQUIRIR ACCESO", key="btn_pro_tab1"):
-                    st.session_state.menu_actual = "PRO"
-                    st.rerun()
-            
-            # Caso B: Usuario con acceso (Gratis con puntos o Premium)
-            else:
-                st.subheader("Entrada de Datos")
-
-                # Entradas numéricas (Persistentes)
-                e_u = st.number_input("Coordenada ESTE (X):", value=None, placeholder="Ej: 771218.100", format="%.3f")
-                n_u = st.number_input("Coordenada NORTE (Y):", value=None, placeholder="Ej: 8997417.000", format="%.3f")
-                
-                label_boton = "📍 UBICAR EN MAPA" if "UBICAR" in modo else "🔄 CONVERTIR COORDENADAS"
-                
-                if st.button(label_boton, use_container_width=True, type="primary"):
-                    with st.spinner("Procesando..."):
-                        
-                        # Ejecución según el modo seleccionado
-                        if "UBICAR" in modo:
-                            z_utm = zona_global.replace("S", "")
-                            epsg_entrada = "epsg:248" + z_utm if "PSAD56" in modo else "epsg:327" + z_utm
-                            geo_trans = pyproj.Transformer.from_crs(epsg_entrada, "epsg:4326", always_xy=True)
-                            lon, lat = geo_trans.transform(e_u, n_u)
-                            # Guardamos en sesión: E_original, N_original, Lat, Lon
-                            st.session_state.resultado = (e_u, n_u, lat, lon)
-                        else:
-                            res = realizar_conversion(e_u, n_u, zona_global, modo)
-                            if res:
-                                st.session_state.resultado = res
-                        
-                        # Consumo de crédito y registro
-                        st.session_state.consultas += 1
-                        registrar_actividad("Individual", f"{modo}", zona=zona_global)               
-        with c2:
-            if st.session_state.resultado:
-                re, rn, lat, lon = st.session_state.resultado
-                st.subheader("Resultado de Conversión")
-                
-                # Tarjetas de coordenadas con estilo SP
-                st.markdown(f"""
-                    <div class="res-card">
-                        <div style="display: flex; justify-content: space-between;">
-                            <div>
-                                <small style="color: #666;">COORDENADA ESTE (X)</small><br>
-                                <b style="font-size: 1.4em; color: #008080;">{re:,.3f}</b>
-                            </div>
-                            <div style="text-align: right;">
-                                <small style="color: #666;">NORTE (Y)</small><br>
-                                <b style="font-size: 1.4em; color: #008080;">{rn:,.3f}</b>
-                            </div>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # Vista Geográfica (Lat/Lon)
-                st.info(f"📍 **Geográficas (WGS84):** Lat: {lat:.8f} | Lon: {lon:.8f}")
-
-                # Renderizado del Mapa
-                with st.expander("🗺️ Ver Ubicación en Mapa de Calles", expanded=True):
-                    try:
-                        # Cambiamos a zoom 17 para ver mejor los nombres
-                        m = folium.Map(location=[lat, lon], zoom_start=17, control_scale=True)
-
-                        folium.Marker(
-                            [lat, lon], 
-                            popup=f"Punto SP\nE:{re:,.2f} N:{rn:,.2f}",
-                            icon=folium.Icon(color='red', icon='info-sign')
-                        ).add_to(m)
-                        
-                        folium_static(m, height=400) # Subí a 400 para que se vea más grande
-                    except Exception as e:
-                        st.error(f"Error al cargar el mapa: {e}")
-
-                # --- INTEGRACIÓN DE DESCARGAS (BLOQUE 6) ---
-                mostrar_botones_exportacion(st.session_state.resultado, es_masivo=False)
-                
-                # Botón para limpiar resultado actual
-                if st.button("🧹 Limpiar Resultado"):
-                    st.session_state.resultado = None
-                    st.rerun()
-            else:
-                # Estado de espera profesional
-                st.markdown("""
-                    <div style="text-align: center; padding: 50px; border: 2px dashed #ccc; border-radius: 15px; opacity: 0.5;">
-                        <p style="font-size: 4em;">📍</p>
-                        <p>Los resultados y el mapa aparecerán aquí <br> después de procesar tus coordenadas.</p>
-                    </div>
-                """, unsafe_allow_html=True)
-
-    # --- TAB 2: PROCESAMIENTO MASIVO (MEJORADO) ---
-    with tab2:
-        if 'df_temporal' in st.session_state and st.session_state.df_temporal is not None:
-            st.success(f"✅ Procesamiento completado: {len(st.session_state.df_temporal)} puntos.")
-            
-            # Vista previa con la columna vacía incluida
-            with st.expander("📄 Ver Previsualización de Datos", expanded=True):
-                st.dataframe(st.session_state.df_temporal.head(100), use_container_width=True)
-
-            # Preparar descarga Excel
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                st.session_state.df_temporal.to_excel(writer, index=False, sheet_name='Conversión_SP')
-            
             st.download_button(
-                label="📊 DESCARGAR EXCEL CON RESULTADOS", 
-                data=output.getvalue(), 
-                file_name=f"SP_Levantamiento_{datetime.now().strftime('%d%m_%H%M')}.xlsx", 
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                use_container_width=True, type="primary"
+                label="📐 Descargar DXF",
+                data=dxf_data,
+                file_name=generar_nombre_archivo(
+                    nombre_base,
+                    "dxf",
+                ),
+                mime="application/dxf",
+                use_container_width=True,
+                on_click=consumir_credito_exportacion,
             )
-            st.write("---")
 
-            # 2. DISTRIBUCIÓN: MAPA (Izquierda) | EXPORTACIÓN Y OTROS (Derecha)
-            col_mapa, col_controles = st.columns([1.8, 1], gap="medium")
-
-            with col_mapa:
-                with st.expander("🗺️ Ver Vista Previa de Calles", expanded=True):
-                    try:
-                        df_mapa = st.session_state.df_para_kml.head(20)
-                        if not df_mapa.empty:
-                            centro_lat = df_mapa['LAT'].mean()
-                            centro_lon = df_mapa['LON'].mean()
-                            
-                            m_masivo = folium.Map(location=[centro_lat, centro_lon], zoom_start=16)
-                            
-                            for _, r in df_mapa.iterrows():
-                                # SOLUCIÓN: Si el nombre es nulo o NaN, le ponemos un nombre genérico
-                                nombre_limpio = str(r['PUNTO']) if pd.notnull(r['PUNTO']) else "Sin Nombre"
-                                # 1. Dibujamos un círculo pequeño y estético
-                                folium.CircleMarker(
-                                    location=[r['LAT'], r['LON']],
-                                    radius=5,
-                                    color='#1E88E5', # Azul profesional
-                                    fill=True,
-                                    fill_color='#1E88E5',
-                                    fill_opacity=0.7,
-                                    popup=f"Punto: {r['PUNTO']}"
-                                ).add_to(m_masivo)
-
-                                # 2. Agregamos el número del punto como texto flotante
-                                folium.map.Marker(
-                                    [r['LAT'], r['LON']],
-                                    icon=folium.DivIcon(
-                                        icon_size=(150,36),
-                                        icon_anchor=(0,0),
-                                        html=f'<div style="font-size: 10pt; color: #d35400; font-weight: bold; text-shadow: 1px 1px white;">{r["PUNTO"]}</div>',
-                                    )
-                                ).add_to(m_masivo)
-                            
-                            folium_static(m_masivo, height=400)
-                            st.caption("📍 Vista previa: Puntos numerados para mayor precisión.")
-                    except Exception as e:
-                        st.warning(f"El mapa no pudo cargarse: {e}")
-
-
-            with col_controles:
-                # Botones de Exportación (KML/CAD) integrados aquí
-                mostrar_botones_exportacion(st.session_state.df_para_kml, es_masivo=True)
-                
-                st.write("") # Espaciador
-                # Botón Cargar Otro al final del costado
-                if st.button("🗑️ Cargar otro archivo", use_container_width=True):
-                    del st.session_state.df_temporal
-                    st.rerun()
-            
-        elif bloqueo_total:
-            st.warning("📍 **Límite de créditos alcanzado**")
-            st.info("Activa el Plan PRO para procesar más archivos.")
-            if st.button("🚀 VER PLANES", key="btn_bloqueo_masivo"):
-                st.session_state.menu_actual = "PRO"; st.rerun()
-        else:
-            st.subheader("Carga de Levantamientos Masivos")
-            file = st.file_uploader("Seleccionar archivo (Excel o CSV):", type=['xlsx', 'csv'])
-            
-            # --- CONTROL DE ENCABEZADOS ---
-            tiene_header = st.checkbox("¿El archivo tiene fila de encabezados? (Nombres de columnas)", value=True)
-            
-            if file is not None:
-                try:
-                    # Lectura inicial del archivo
-                    if file.name.endswith('.csv'):
-            # El motor 'python' con sep=None detecta si es coma o punto y coma automáticamente
-                        df_to_proc = pd.read_csv(file, sep=None, engine='python', header=0 if tiene_header else None)
-                    else:
-                        df_to_proc = pd.read_excel(file, header=0 if tiene_header else None)
-
-                    # --- LÓGICA DE LETRAS TIPO EXCEL (A, B, C...) ---
-                    def index_to_letter(n):
-                        res = ""
-                        while n >= 0:
-                            res = string.ascii_uppercase[n % 26] + res
-                            n = n // 26 - 1
-                        return res
-
-                    # Definición de opciones para los selectores
-                    if tiene_header:
-                        opciones_cols = list(df_to_proc.columns)
-                    else:
-                        # AQUÍ EL CAMBIO: Generamos "Columna A", "Columna B", etc.
-                        opciones_cols = [f"Columna {index_to_letter(i)}" for i in range(len(df_to_proc.columns))]
-                    
-                    # Diccionario para mapear la opción seleccionada al índice real (0, 1, 2...)
-                    dict_indices = {op: i for i, op in enumerate(opciones_cols)}
-
-                    # Función de ayuda para detección automática (se mantiene igual)
-                    def auto_detect(lista, palabras_clave):
-                        for p in palabras_clave:
-                            for col in lista:
-                                if p.lower() in str(col).lower():
-                                    return col
-                        return lista[0]
-
-                    st.write("---")
-                    st.markdown("##### ⚙️ Configuración del Levantamiento")
-                    
-                    c_opt1, c_opt2 = st.columns(2)
-                    tiene_z = c_opt1.checkbox("¿El archivo tiene Elevación (Z)?", key="chk_z")
-                    tiene_desc = c_opt2.checkbox("¿El archivo tiene Código/Descripción?", key="chk_desc")
-
-                    # Selectores principales (Ahora con letras si no hay header)
-                    c1, c2, c3 = st.columns(3)
-                    sel_p = c1.selectbox("ID / Punto:", opciones_cols, index=opciones_cols.index(auto_detect(opciones_cols, ['PUNTO', 'ID', 'PNT', 'NOMBRE'])))
-                    sel_e = c2.selectbox("Este (X):", opciones_cols, index=opciones_cols.index(auto_detect(opciones_cols, ['ESTE', 'X', 'EAST'])))
-                    sel_n = c3.selectbox("Norte (Y):", opciones_cols, index=opciones_cols.index(auto_detect(opciones_cols, ['NORTE', 'Y', 'NORTH'])))
-
-                    sel_z = None
-                    sel_desc = None
-                    if tiene_z or tiene_desc:
-                        c4, c5 = st.columns(2)
-                        if tiene_z:
-                            sel_z = c4.selectbox("Elevación (Z):", opciones_cols, index=opciones_cols.index(auto_detect(opciones_cols, ['Z', 'ELEV', 'ALT', 'COTA'])))
-                        if tiene_desc:
-                            sel_desc = c5.selectbox("Descripción:", opciones_cols, index=opciones_cols.index(auto_detect(opciones_cols, ['DESC', 'COD', 'COMENT', 'TIPO'])))
-
-                    # Mapeo final de columnas (Nombres o Índices reales)
-                    # Usamos dict_indices para que el programa sepa que "Columna B" es el índice 1
-                    col_p = sel_p if tiene_header else dict_indices[sel_p]
-                    col_e = sel_e if tiene_header else dict_indices[sel_e]
-                    col_n = sel_n if tiene_header else dict_indices[sel_n]
-                    col_z = (sel_z if tiene_header else dict_indices[sel_z]) if sel_z else None
-                    col_c = (sel_desc if tiene_header else dict_indices[sel_desc]) if sel_desc else None
-
-                    # --- EL RESTO DEL BOTÓN DE CONVERSIÓN SIGUE IGUAL ---
-                    # --- BOTÓN DE CONVERSIÓN MASIVA (PARTE 1) ---
-                    if st.button("🚀 INICIAR CONVERSIÓN MASIVA", use_container_width=True, type="primary"):
-                        # 1. SEGURIDAD Y RECORTE DE DATOS: Determinamos el límite REAL según el plan
-                        if not (st.session_state.es_pro or st.session_state.es_admin or st.session_state.es_pase_diario):
-                            puntos_permitidos = max(0, LIMITE_GRATIS_DIARIO - st.session_state.consultas)
-                            if puntos_permitidos <= 0:
-                                st.error("❌ Has agotado tus créditos gratuitos de hoy.")
-                                st.stop()
-                            
-                            df_a_procesar = df_to_proc.head(puntos_permitidos).copy()
-                            st.warning(f"⚠️ Modo Gratuito: Procesando solo los primeros {len(df_a_procesar)} puntos.")
-                        else:
-                            # Usuarios con Pase Diario o PRO procesan todo el archivo (o hasta su límite de pase)
-                            if st.session_state.es_pase_diario:
-                                puntos_restantes_pase = max(0, LIMITE_FILAS_PASE_DIARIO - st.session_state.consultas)
-                                if puntos_restantes_pase <= 0:
-                                    st.error("❌ Tu Pase Diario ha llegado al límite de 500 puntos.")
-                                    st.stop()
-                                df_a_procesar = df_to_proc.head(puntos_restantes_pase).copy()
-                            else:
-                                df_a_procesar = df_to_proc.copy()
-
-                        # 2. INICIO DEL PROCESAMIENTO
-                        with st.spinner("Procesando coordenadas..."):
-                            res_list = []
-                            errores = []
-                            
-                            # UN SOLO BUCLE: Limpio y eficiente
-                            for idx, row in df_a_procesar.iterrows():
-                                try:
-                                    # Limpieza de datos
-                                    raw_e = str(row[col_e]).strip() if pd.notnull(row[col_e]) else ""
-                                    raw_n = str(row[col_n]).strip() if pd.notnull(row[col_n]) else ""
-                                    
-                                    if not raw_e or not raw_n or raw_e.lower() == 'nan':
-                                        raise ValueError("Celda vacía o nula")
-
-                                    val_e = float(raw_e.replace(',', '.'))
-                                    val_n = float(raw_n.replace(',', '.'))
-                                    
-                                    # Validación técnica de rangos UTM
-                                    es_valido, msg_error = validar_coordenadas_utm(val_e, val_n)
-                                    
-                                    if es_valido:
-                                        conv = realizar_conversion(val_e, val_n, zona_global, modo)
-                                        if conv:
-                                            res_list.append(conv)
-                                        else:
-                                            res_list.append((0, 0, 0, 0))
-                                            errores.append(f"Fila {idx+1}: Error en motor de cálculo.")
-                                    else:
-                                        res_list.append((0, 0, 0, 0))
-                                        errores.append(f"Fila {idx+1}: {msg_error}")
-
-                                except (ValueError, TypeError):
-                                    res_list.append((0, 0, 0, 0))
-                                    errores.append(f"Fila {idx+1}: Formato numérico inválido.")
-                                except Exception as e:
-                                    res_list.append((0, 0, 0, 0))
-                                    errores.append(f"Fila {idx+1}: {str(e)}")
-                            # 1. Mostrar reporte de errores si existen
-                            if errores:
-                                with st.expander("⚠️ Reporte de Calidad: Filas con observaciones"):
-                                    for err in errores:
-                                        st.write(f"• {err}")
-                                    st.info("Nota: Las filas con error se marcaron con 0 para no detener el proceso.")
-
-                            # 2. Creación del DataFrame de resultados
-                            # res_list tiene exactamente el mismo largo que df_a_procesar
-                            df_res = pd.DataFrame(res_list, columns=['ESTE_CONV', 'NORTE_CONV', 'LATITUD', 'LONGITUD'])
-                            
-                            # Concatenamos reseteando índices para evitar desplazamientos
-                            df_final = pd.concat([df_a_procesar.reset_index(drop=True), df_res], axis=1)
-                            
-                            # 3. Guardar en session_state para persistencia
-                            st.session_state.df_temporal = df_final
-                            st.session_state.df_para_kml = df_final.copy()
-                            
-                            # Mapeo de columnas necesarias para el Bloque 6 (KML/CAD)
-                            st.session_state.df_para_kml['PUNTO'] = df_final[col_p]
-                            st.session_state.df_para_kml['LAT'] = df_final['LATITUD']
-                            st.session_state.df_para_kml['LON'] = df_final['LONGITUD']
-                            st.session_state.df_para_kml['ESTE'] = df_final['ESTE_CONV']
-                            st.session_state.df_para_kml['NORTE'] = df_final['NORTE_CONV']
-                            
-                            if col_z: st.session_state.df_para_kml['Z_CAD'] = df_final[col_z]
-                            if col_c: st.session_state.df_para_kml['DESC_CAD'] = df_final[col_c]
-
-                            # 4. Actualización de Créditos y Sincronización GSheets
-                            puntos_procesados = len(df_a_procesar)
-
-                            if st.session_state.get('es_pase_diario') and 'codigo_activo' in st.session_state:
-                                try:
-                                    df_db = conn.read(worksheet="Usuarios", ttl=0)
-                                    cod_actual = st.session_state.codigo_activo
-                                    fila_mask = df_db['Codigo'].astype(str) == str(cod_actual)
-                                    
-                                    if fila_mask.any():
-                                        # 1. Obtener lo que ya había consumido en la nube
-                                        val_previo = pd.to_numeric(df_db.loc[fila_mask, 'Creditos_Usados'], errors='coerce').fillna(0).iloc[0]
-                                        nuevo_total = int(val_previo + puntos_procesados)
-                                        
-                                        # 2. Actualizar la base de datos (GSheets)
-                                        df_db.loc[fila_mask, 'Creditos_Usados'] = nuevo_total
-                                        conn.update(worksheet="Usuarios", data=df_db)
-                                        
-                                        # 3. Sincronizar el estado local para que la barra de UI se actualice
-                                        st.session_state.consultas = nuevo_total
-                                except Exception as e:
-                                    st.warning(f"Aviso: Se procesó localmente pero falló la sincronización con la nube: {e}")
-                            else:
-                                st.session_state.consultas += puntos_procesados
-
-                            registrar_actividad("Masivo", f"Archivo de {puntos_procesados} puntos", zona=zona_global)
-                            # 5. Finalización con éxito
-                            st.balloons()
-                            st.success(f"✅ ¡Conversión completada! Se procesaron {puntos_procesados} puntos.")
-                            time.sleep(1.5) 
-                            st.rerun()
-
-
-                except Exception as e:
-                    st.error(f"Error al leer el archivo: {e}")
 
 # =========================================================
-# BLOQUE 9: VISTA PROFESIONAL - PLANES Y ACTIVACIÓN
+# LOG EXPORTACIÓN
 # =========================================================
-if st.session_state.menu_actual == "PRO":
-    st.title("💎 Membresía SP Profesional")
-    st.markdown("##### Potencia tu flujo de trabajo con acceso ilimitado")
 
-    # --- Lógica dinámica de estados de suscripción ---
-    if st.session_state.get('es_admin'):
-        st.success("👑 **MODO MAESTRO ACTIVO:** Acceso Total JGZ - Disfruta del control total.")
-    elif st.session_state.get('es_pro'):
-        st.success("💎 **PLAN PRO ACTIVO:** Tienes acceso ilimitado a todas las herramientas.")
-    elif st.session_state.get('es_pase_diario'):
-        puntos_restantes = 500 - st.session_state.consultas
-        st.success(f"🎫 **PASE DIARIO ACTIVO:** Te quedan {puntos_restantes} créditos para procesamiento masivo.")
-    else:
-        st.info("💡 **Versión Gratuita:** Actualmente tienes un límite de 10 puntos por día.")
+def registrar_exportacion(
+    tipo,
+    cantidad,
+):
 
-    # 2. Diseño de Tarjetas de Planes (CSS Inyectado)
-    st.markdown("""
-        <style>
-        .pro-card {
-            padding: 25px;
-            border-radius: 15px;
-            text-align: center;
-            margin-bottom: 20px;
-            transition: transform 0.3s;
-            border: 1px solid #e2e8f0;
-            height: 100%;
+    registrar_log(
+        accion=f"EXPORT_{tipo}",
+        nombre_archivo=tipo,
+        puntos_ok=cantidad,
+        errores_filas=0,
+        tiempo_ejecucion=0,
+    )
+
+
+# =========================================================
+# PANEL EXPORTACIÓN
+# =========================================================
+
+def render_panel_exportacion(df):
+
+    st.markdown("---")
+
+    st.markdown(
+        """
+        <div class='card-res'>
+        <h3>Exportación profesional</h3>
+        <p>
+        Descarga tus resultados en formatos reales
+        de trabajo topográfico.
+        </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    render_exportaciones(df)
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 7
+# Google Sheets, usuarios, créditos y licencias
+# =========================================================
+
+
+# =========================================================
+# CONEXIÓN GOOGLE SHEETS
+# =========================================================
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+@st.cache_resource
+
+def connect_gsheet():
+
+    try:
+
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=SCOPES,
+        )
+
+        client = gspread.authorize(
+            creds
+        )
+
+        spreadsheet = client.open_by_key(
+            SHEET_ID
+        )
+
+        return spreadsheet
+
+    except Exception as e:
+
+        st.error(
+            f"""
+            Error Google Sheets:
+            {e}
+            """
+        )
+
+        return None
+
+# =========================================================
+# LEER HOJA
+# =========================================================
+
+def read_sheet(sheet_name):
+
+    try:
+
+        conn = connect_gsheet()
+
+        if conn is None:
+            return pd.DataFrame()
+
+        df = conn.read(
+            worksheet=sheet_name,
+            ttl=0,
+        )
+
+        if df is None:
+            return pd.DataFrame()
+
+        return df
+
+    except Exception as e:
+
+        st.error(
+            f"Error leyendo hoja {sheet_name}"
+        )
+
+        return pd.DataFrame()
+
+
+# =========================================================
+# ESCRIBIR HOJA
+# =========================================================
+
+def update_sheet(sheet_name, df):
+
+    try:
+
+        conn = connect_gsheet()
+
+        if conn is None:
+            return False
+
+        conn.update(
+            worksheet=sheet_name,
+            data=df,
+        )
+
+        return True
+
+    except Exception as e:
+
+        st.error(
+            f"Error actualizando hoja {sheet_name}"
+        )
+
+        return False
+
+
+# =========================================================
+# OBTENER USUARIOS
+# =========================================================
+
+def get_users_df():
+    return read_sheet("Usuarios")
+
+
+def get_licenses_df():
+    return read_sheet("Licencias")
+
+
+def get_logs_df():
+    return read_sheet("Logs")
+
+
+# =========================================================
+# BUSCAR USUARIO
+# =========================================================
+
+def get_user(user_id):
+
+    df = get_users_df()
+
+    if df.empty:
+        return None
+
+    result = df[
+        df["user_id"].astype(str) == str(user_id)
+    ]
+
+    if result.empty:
+        return None
+
+    return result.iloc[0].to_dict()
+
+
+# =========================================================
+# CREAR USUARIO
+# =========================================================
+
+def create_user(user_id):
+
+    df = get_users_df()
+
+    nuevo = pd.DataFrame([
+        {
+            "user_id": user_id,
+            "plan": "FREE",
+            "tipo_licencia": "NINGUNA",
+            "fecha_activacion": "",
+            "fecha_expiracion": "",
+            "creditos_disponibles": FREE_DAILY_CREDITS,
+            "ultima_fecha_free": str(date.today()),
         }
-        .pro-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-        .price { font-size: 2em; font-weight: 800; margin: 10px 0; color: #008080; }
-        .feature-list { text-align: left; font-size: 0.85em; list-style: none; padding: 0; min-height: 120px; }
-        .feature-list li { margin-bottom: 8px; color: #475569; }
-        .card-diario { background-color: #ffffff; border-top: 5px solid #64748b; }
-        .card-mensual { background-color: #f0f7ff; border-top: 5px solid #004d99; border-bottom: 2px solid #004d99; }
-        .card-anual { background-color: #fffbeb; border-top: 5px solid #fbbf24; }
-        </style>
-    """, unsafe_allow_html=True)
+    ])
 
-    cp1, cp2, cp3 = st.columns(3)
-    
-    with cp1:
-        st.markdown(f'''
-            <div class="pro-card card-diario">
-                <h3>Pase Diario</h3>
-                <p class="price">S/ 5.00</p>
-                <ul class="feature-list">
-                    <li>✅ Acceso total por 24 horas</li>
-                    <li>✅ Carga masiva (Hasta {LIMITE_FILAS_PASE_DIARIO} filas)</li>
-                    <li>✅ Exportación KML y DXF (hasta 500)</li>
-                    <li>✅ Soporte vía WhatsApp</li>
-                </ul>
-            </div>
-        ''', unsafe_allow_html=True)
-    
-    with cp2:
-        st.markdown('''
-            <div class="pro-card card-mensual">
-                <h3>Plan Mensual</h3>
-                <p class="price">S/ 20.00</p>
-                <ul class="feature-list">
-                    <li>✅ <b>Sin límites de procesamiento</b></li>
-                    <li>✅ KML y DXF Masivo ilimitado</li>
-                    <li>✅ Conversión de proyectos grandes</li>
-                    <li>✅ Acceso Premium por 30 días</li>
-                </ul>
-            </div>
-        ''', unsafe_allow_html=True)
-    
-    with cp3:
-        st.markdown('''
-            <div class="pro-card card-anual">
-                <h3>Plan Anual</h3>
-                <p class="price">S/ 180.00</p>
-                <ul class="feature-list">
-                    <li>✅ <b>Todo lo del Plan Mensual</b></li>
-                    <li>✅ Ahorro real de S/ 60.00 al año</li>
-                    <li>✅ Prioridad en nuevas funciones</li>
-                    <li>✅ Atención VIP personalizada</li>
-                </ul>
-            </div>
-        ''', unsafe_allow_html=True)
+    df = pd.concat(
+        [df, nuevo],
+        ignore_index=True,
+    )
 
-    st.write("---")
+    update_sheet(
+        "Usuarios",
+        df,
+    )
 
-    # 3. Sección de Pago y Validación
-    col_pago, col_cod = st.columns([1.2, 1], gap="large")
-    
-    with col_pago:
-        st.subheader("📱 1. Realiza el Pago (Yape/Plin)")
-        st.write("Envía el monto del plan elegido y recibe tu acceso inmediato.")
-        
-        # Caja de información de pago destacada con el mensaje corregido
-        st.markdown("""
-            <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #008080; margin-bottom: 20px;">
-                <p style="margin-bottom: 5px;"><b>Titular:</b> Joan Gue.</p>
-                <p style="margin-bottom: 5px;"><b>Número:</b> 924 886 915</p>
-                <p style="margin-bottom: 0px; color: #008080; font-weight: bold; font-size: 1.1em;">✅ ¡Código instantáneo por WhatsApp!</p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        qr_path = "mi_qr.png"
-        if os.path.exists(qr_path):
-            # Contenedor para centrar la imagen
-            _, col_qr_center, _ = st.columns([0.2, 1, 0.2])
-            with col_qr_center:
-                st.image(qr_path, caption="Escanea para pagar", use_container_width=True)
+    return nuevo.iloc[0].to_dict()
+
+
+# =========================================================
+# ACTUALIZAR USUARIO
+# =========================================================
+
+def actualizar_usuario(
+    user_id,
+    updates,
+):
+
+    df = get_users_df()
+
+    if df.empty:
+        return False
+
+    mask = (
+        df["user_id"].astype(str)
+        == str(user_id)
+    )
+
+    if not mask.any():
+        return False
+
+    for key, value in updates.items():
+
+        if key in df.columns:
+
+            df.loc[mask, key] = value
+
+    update_sheet(
+        "Usuarios",
+        df,
+    )
+
+    return True
+
+
+# =========================================================
+# RESET CRÉDITOS FREE
+# =========================================================
+
+def reset_creditos_si_corresponde():
+
+    user_id = st.session_state.user_id
+
+    user = get_user(user_id)
+
+    if user is None:
+        return
+
+    hoy = str(date.today())
+
+    ultima = str(
+        user.get(
+            "ultima_fecha_free",
+            ""
+        )
+    )
+
+    if hoy != ultima:
+
+        actualizar_usuario(
+            user_id,
+            {
+                "creditos_disponibles": FREE_DAILY_CREDITS,
+                "ultima_fecha_free": hoy,
+            },
+        )
+
+        st.session_state.credits_free = (
+            FREE_DAILY_CREDITS
+        )
+
+
+# =========================================================
+# CARGAR SESSION USER
+# =========================================================
+
+def load_user_session():
+
+    user_id = st.session_state.user_id
+
+    user = get_user(user_id)
+
+    if user is None:
+        user = create_user(user_id)
+
+    reset_creditos_si_corresponde()
+
+    st.session_state.plan = (
+        user.get("plan", "FREE")
+    )
+
+    st.session_state.tipo_licencia = user.get("tipo_licencia", "NINGUNA")
+    st.session_state.fecha_expiracion = user.get("fecha_expiracion", "")
+    st.session_state.ultima_fecha_free = user.get("ultima_fecha_free", "")
+
+    st.session_state.credits_free = int(
+        float(
+            user.get(
+                "creditos_disponibles",
+                FREE_DAILY_CREDITS,
+            )
+        )
+    )
+
+
+# =========================================================
+# VALIDAR LICENCIA
+# =========================================================
+
+def validar_licencia(codigo):
+
+    licencias = get_licenses_df()
+
+    if licencias.empty:
+        return False, "Sin licencias"
+
+    result = licencias[
+        licencias["codigo"].astype(str)
+        == str(codigo)
+    ]
+
+    if result.empty:
+        return False, "Código inválido"
+
+    row = result.iloc[0]
+
+    estado = str(
+        row.get("estado", "")
+    ).upper()
+
+    if estado == "USADO":
+        return False, "Código ya usado"
+
+    return True, row.to_dict()
+
+
+# =========================================================
+# DURACIÓN PLAN
+# =========================================================
+
+def get_plan_duration_days(plan):
+
+    plan = str(plan).upper()
+
+    mapping = {
+        "DIARIO": 1,
+        "SEMANAL": 7,
+        "MENSUAL": 30,
+        "ANUAL": 365,
+        "ADMIN": 9999,
+    }
+
+    return mapping.get(plan, 0)
+
+
+# =========================================================
+# ACTIVAR LICENCIA
+# =========================================================
+
+def activar_licencia(codigo):
+
+    valido, result = validar_licencia(codigo)
+
+    if not valido:
+
+        mostrar_mensaje(
+            result,
+            "error",
+        )
+
+        return False
+
+    licencia = result
+
+    tipo = licencia["plan_tipo"]
+
+    dias = get_plan_duration_days(tipo)
+
+    fecha_inicio = datetime.now()
+
+    fecha_fin = (
+        fecha_inicio + timedelta(days=dias)
+    )
+
+    plan = (
+        "ADMIN"
+        if tipo == "ADMIN"
+        else "PRO"
+    )
+
+    actualizar_usuario(
+        st.session_state.user_id,
+        {
+            "plan": plan,
+            "tipo_licencia": tipo,
+            "fecha_activacion": str(fecha_inicio),
+            "fecha_expiracion": str(fecha_fin),
+        },
+    )
+
+    licencias = get_licenses_df()
+
+    mask = (
+        licencias["codigo"].astype(str)
+        == str(codigo)
+    )
+
+    licencias.loc[
+        mask,
+        "estado"
+    ] = "USADO"
+
+    licencias.loc[
+        mask,
+        "usado_por"
+    ] = st.session_state.user_id
+
+    licencias.loc[
+        mask,
+        "fecha_uso"
+    ] = str(datetime.now())
+
+    update_sheet(
+        "Licencias",
+        licencias,
+    )
+
+    st.session_state.plan = plan
+
+    st.session_state.tipo_licencia = tipo
+    st.session_state.fecha_expiracion = fecha_fin.strftime("%Y-%m-%d %H:%M:%S")
+
+    mostrar_mensaje(
+        f"Plan {tipo} activado",
+        "success",
+    )
+
+    return True
+
+
+# =========================================================
+# VALIDAR EXPIRACIÓN
+# =========================================================
+
+def validar_expiracion_plan():
+
+    if st.session_state.plan == "FREE":
+        return
+
+    user = get_user(
+        st.session_state.user_id
+    )
+
+    if user is None:
+        return
+
+    fecha_exp = str(
+        user.get(
+            "fecha_expiracion",
+            ""
+        )
+    )
+
+    if not fecha_exp:
+        return
+
+    try:
+
+        fecha_exp = pd.to_datetime(
+            fecha_exp
+        )
+
+        if datetime.now() > fecha_exp:
+
+            actualizar_usuario(
+                st.session_state.user_id,
+                {
+                    "plan": "FREE",
+                    "tipo_licencia": "NINGUNA",
+                },
+            )
+
+            st.session_state.plan = "FREE"
+
+            st.session_state.tipo_licencia = (
+                "NINGUNA"
+            )
+
+    except:
+        pass
+
+
+# =========================================================
+# CONSUMIR CRÉDITOS
+# =========================================================
+
+def consumir_creditos(cantidad=1):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    disponibles = int(
+        st.session_state.credits_free
+    )
+
+    if disponibles < cantidad:
+
+        mostrar_mensaje(
+            "Créditos insuficientes",
+            "warning",
+        )
+
+        return False
+
+    nuevos = disponibles - cantidad
+
+    actualizar_usuario(
+        st.session_state.user_id,
+        {
+            "creditos_disponibles": nuevos,
+        },
+    )
+
+    st.session_state.credits_free = nuevos
+
+    return True
+
+
+# =========================================================
+# VALIDAR LÍMITE MASIVO FREE
+# =========================================================
+
+def validar_limite_free(df):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    if len(df) <= FREE_MAX_ROWS:
+        return True
+
+    st.warning(
+        f"""
+        Plan FREE permite máximo
+        {FREE_MAX_ROWS} filas masivas.
+        """
+    )
+
+    return False
+
+
+# =========================================================
+# LOGS
+# =========================================================
+
+def registrar_log(
+    accion,
+    nombre_archivo="",
+    puntos_ok=0,
+    errores_filas=0,
+    tiempo_ejecucion=0,
+):
+
+    logs = get_logs_df()
+
+    nuevo = pd.DataFrame([
+        {
+            "fecha": str(datetime.now()),
+            "user_id": st.session_state.user_id,
+            "licencia_activa": st.session_state.tipo_licencia,
+            "accion": accion,
+            "nombre_archivo": nombre_archivo,
+            "puntos_ok": puntos_ok,
+            "errores_filas": errores_filas,
+            "tiempo_ejecucion": tiempo_ejecucion,
+        }
+    ])
+
+    logs = pd.concat(
+        [logs, nuevo],
+        ignore_index=True,
+    )
+
+    update_sheet(
+        "Logs",
+        logs,
+    )
+
+
+# =========================================================
+# PANEL PLAN
+# =========================================================
+
+def render_user_plan():
+
+    st.markdown(
+        """
+        <div class='sidebar-card'>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Tu plan")
+
+    st.write(
+        f"Plan: {st.session_state.plan}"
+    )
+
+    st.write(
+        f"Licencia: {st.session_state.tipo_licencia}"
+    )
+
+    if st.session_state.plan == "FREE":
+
+        st.write(
+            f"""
+            Créditos:
+            {st.session_state.credits_free}
+            """
+        )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 8
+# Módulo Manual | Convertir y Ubicar
+# =========================================================
+
+
+# =========================================================
+# FORM MANUAL
+# =========================================================
+
+def render_manual_form():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Conversión y ubicación manual
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab1, tab2 = st.tabs([
+        "Convertir",
+        "Ubicar",
+    ])
+
+    with tab1:
+        render_manual_convertir()
+
+    with tab2:
+        render_manual_ubicar()
+
+
+# =========================================================
+# INPUT TYPE
+# =========================================================
+
+def render_input_type_manual(key="manual"):
+
+    tipo = st.radio(
+        "Tipo de coordenadas",
+        [
+            "UTM",
+            "LAT/LON",
+        ],
+        horizontal=True,
+        key=f"tipo_{key}",
+    )
+
+    return tipo
+
+
+# =========================================================
+# SELECTORES
+# =========================================================
+
+def render_selectores_conversion(key="manual"):
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        source_datum = st.selectbox(
+            "Datum origen",
+            VALID_DATUMS,
+            key=f"src_datum_{key}",
+        )
+
+        source_zone = st.selectbox(
+            "Zona origen",
+            VALID_ZONES,
+            key=f"src_zone_{key}",
+        )
+
+    with col2:
+
+        target_datum = st.selectbox(
+            "Datum destino",
+            VALID_DATUMS,
+            index=1,
+            key=f"tgt_datum_{key}",
+        )
+
+        target_zone = st.selectbox(
+            "Zona destino",
+            VALID_ZONES,
+            index=1,
+            key=f"tgt_zone_{key}",
+        )
+
+    return (
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    )
+
+
+def render_selectores_ubicacion(key="manual"):
+
+    datum = st.selectbox(
+        "Datum",
+        VALID_DATUMS,
+        key=f"datum_{key}",
+    )
+
+    zone = st.selectbox(
+        "Zona",
+        VALID_ZONES,
+        index=1,
+        key=f"zone_{key}",
+    )
+
+    return datum, zone
+
+
+# =========================================================
+# INPUTS MANUALES
+# =========================================================
+
+def render_inputs_utm_manual(prefix):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        punto = st.text_input("PUNTO", placeholder="P1", key=f"{prefix}_punto")
+        este = st.text_input("ESTE", placeholder="500000", key=f"{prefix}_este")
+        z = st.text_input("Z / Elevación", placeholder="Opcional", key=f"{prefix}_z")
+
+    with col2:
+        norte = st.text_input("NORTE", placeholder="8500000", key=f"{prefix}_norte")
+        descripcion = st.text_input("Descripción", placeholder="Opcional", key=f"{prefix}_desc")
+
+    return {
+        "PUNTO": punto,
+        "ESTE": este,
+        "NORTE": norte,
+        "Z": z,
+        "DESCRIPCION": descripcion,
+    }
+
+
+def render_inputs_geo_manual(prefix):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        punto = st.text_input("PUNTO", placeholder="P1", key=f"{prefix}_punto")
+        lat = st.text_input("LATITUD", placeholder="-12.046374", key=f"{prefix}_lat")
+        z = st.text_input("Z / Elevación", placeholder="Opcional", key=f"{prefix}_z")
+
+    with col2:
+        lon = st.text_input("LONGITUD", placeholder="-77.042793", key=f"{prefix}_lon")
+        descripcion = st.text_input("Descripción", placeholder="Opcional", key=f"{prefix}_desc")
+
+    return {
+        "PUNTO": punto,
+        "LAT": lat,
+        "LON": lon,
+        "Z": z,
+        "DESCRIPCION": descripcion,
+    }
+
+# =========================================================
+# DATAFRAME MANUAL
+# =========================================================
+
+def construir_df_manual(
+    data,
+    input_type="UTM",
+):
+
+    if input_type == "UTM":
+
+        row = {
+            "PUNTO": sanitizar_texto(
+                data["PUNTO"]
+            ),
+            "ESTE": limpiar_numero(
+                data["ESTE"]
+            ),
+            "NORTE": limpiar_numero(
+                data["NORTE"]
+            ),
+            "LAT": np.nan,
+            "LON": np.nan,
+            "Z": limpiar_numero(
+                data["Z"]
+            ),
+            "DESCRIPCION": sanitizar_texto(
+                data["DESCRIPCION"]
+            ),
+            "ERROR": "",
+        }
+
+    else:
+
+        row = {
+            "PUNTO": sanitizar_texto(
+                data["PUNTO"]
+            ),
+            "ESTE": np.nan,
+            "NORTE": np.nan,
+            "LAT": limpiar_numero(
+                data["LAT"]
+            ),
+            "LON": limpiar_numero(
+                data["LON"]
+            ),
+            "Z": limpiar_numero(
+                data["Z"]
+            ),
+            "DESCRIPCION": sanitizar_texto(
+                data["DESCRIPCION"]
+            ),
+            "ERROR": "",
+        }
+
+    return pd.DataFrame([row])
+
+
+# =========================================================
+# MANUAL CONVERTIR
+# =========================================================
+
+def render_manual_convertir():
+
+    input_type = render_input_type_manual(
+        "manual_convert"
+    )
+
+    (
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    ) = render_selectores_conversion(
+        "manual_convert"
+    )
+
+    st.markdown("---")
+
+    if input_type == "UTM":
+
+        data = render_inputs_utm_manual("manual_convert")
+        data = render_inputs_geo_manual()
+
+    ejecutar = st.button(
+        "Convertir punto",
+        use_container_width=True,
+        type="primary",
+    )
+
+    if not ejecutar:
+        return
+
+    try:
+
+        df = construir_df_manual(
+            data,
+            input_type,
+        )
+
+        if input_type == "UTM":
+
+            resultado = ejecutar_conversion_masiva(
+                df=df,
+                input_type="UTM",
+                source_datum=source_datum,
+                source_zone=source_zone,
+                target_datum=target_datum,
+                target_zone=target_zone,
+            )
+
         else:
-            st.warning("📸 Imagen 'mi_qr.png' no detectada.")
 
-    with col_cod:
-        st.subheader("🔑 2. Activar Acceso")
-        st.write("Introduce el código de activación que te enviamos:")
-        
-        codigo_ingresado = st.text_input("Código de activación:", placeholder="Ej: SP-XXXXXX", label_visibility="collapsed")
-        
-        if st.button("🚀 VALIDAR Y ACTIVAR", use_container_width=True, type="primary"):
-            if not codigo_ingresado:
-                st.warning("Por favor, ingresa un código.")
+            resultado = ejecutar_conversion_masiva(
+                df=df,
+                input_type="LAT/LON",
+                source_datum="",
+                source_zone="",
+                target_datum=target_datum,
+                target_zone=target_zone,
+            )
+
+        render_resultado_manual(
+            resultado
+        )
+
+        render_mapa_manual(
+            resultado
+        )
+
+        render_panel_exportacion(
+            resultado
+        )
+
+        registrar_log(
+            accion="MANUAL_CONVERSION",
+            puntos_ok=1,
+        )
+
+    except Exception as e:
+
+        st.error(str(e))
+
+
+# =========================================================
+# MANUAL UBICAR
+# =========================================================
+
+def render_manual_ubicar():
+
+    input_type = render_input_type_manual(
+        "manual_ubicar"
+    )
+
+    if input_type == "UTM":
+
+        datum, zone = (
+            render_selectores_ubicacion(
+                "manual_ubicar"
+            )
+        )
+
+    st.markdown("---")
+
+    if input_type == "UTM":
+
+        data = render_inputs_utm_manual("manual_ubicar")
+        data = render_inputs_geo_manual("manual_ubicar")
+
+    ejecutar = st.button(
+        "Ubicar punto",
+        use_container_width=True,
+        type="primary",
+    )
+
+    if not ejecutar:
+        return
+
+    try:
+
+        df = construir_df_manual(
+            data,
+            input_type,
+        )
+
+        if input_type == "UTM":
+
+            resultado = ejecutar_ubicacion_masiva(
+                df=df,
+                input_type="UTM",
+                datum=datum,
+                zone=zone,
+            )
+
+        else:
+
+            resultado = ejecutar_ubicacion_masiva(
+                df=df,
+                input_type="LAT/LON",
+                datum="",
+                zone="",
+            )
+
+        render_resultado_manual(
+            resultado
+        )
+
+        render_mapa_manual(
+            resultado
+        )
+
+        render_panel_exportacion(
+            resultado
+        )
+
+        registrar_log(
+            accion="MANUAL_UBICACION",
+            puntos_ok=1,
+        )
+
+    except Exception as e:
+
+        st.error(str(e))
+# =========================================================
+# SP Topo-Convert V7 | PARTE 9
+# Módulo Masivo | Convertir y Ubicar
+# =========================================================
+
+
+# =========================================================
+# CONFIG ARCHIVO
+# =========================================================
+
+def render_configuracion_archivo():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Configuración del archivo
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        tiene_encabezado = st.checkbox(
+            "El archivo tiene encabezado",
+            value=True,
+        )
+
+    with col2:
+
+        incluir_z = st.checkbox(
+            "Contiene elevación (Z)",
+            value=False,
+        )
+
+    with col3:
+
+        incluir_desc = st.checkbox(
+            "Contiene descripción",
+            value=False,
+        )
+
+    return (
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    )
+
+
+# =========================================================
+# SUBIR ARCHIVO
+# =========================================================
+
+def render_uploader_masivo():
+
+    uploaded_file = st.file_uploader(
+        "Sube tu archivo",
+        type=VALID_FILE_EXTENSIONS,
+        help=(
+            "Formatos: CSV, XLSX, XLS y TXT"
+        ),
+    )
+
+    return uploaded_file
+
+
+# =========================================================
+# LEER ARCHIVO MASIVO
+# =========================================================
+
+def procesar_archivo_subido(
+    uploaded_file,
+    tiene_encabezado,
+):
+
+    if uploaded_file is None:
+        return None
+
+    df = leer_archivo(uploaded_file)
+
+    valido, mensaje = validar_dataframe(df)
+
+    if not valido:
+
+        st.error(mensaje)
+
+        return None
+
+    if not tiene_encabezado:
+
+        df = convertir_columnas_excel(df)
+
+    return df
+
+
+# =========================================================
+# INPUT TYPE MASIVO
+# =========================================================
+
+def render_input_type_masivo(key):
+
+    tipo = st.radio(
+        "Tipo de coordenadas",
+        [
+            "UTM",
+            "LAT/LON",
+        ],
+        horizontal=True,
+        key=key,
+    )
+
+    return tipo
+
+
+# =========================================================
+# SELECTORES MASIVOS
+# =========================================================
+
+def render_selectores_conversion_masivo():
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        source_datum = st.selectbox(
+            "Datum origen",
+            VALID_DATUMS,
+            key="masivo_src_datum",
+        )
+
+        source_zone = st.selectbox(
+            "Zona origen",
+            VALID_ZONES,
+            index=1,
+            key="masivo_src_zone",
+        )
+
+    with col2:
+
+        target_datum = st.selectbox(
+            "Datum destino",
+            VALID_DATUMS,
+            index=1,
+            key="masivo_tgt_datum",
+        )
+
+        target_zone = st.selectbox(
+            "Zona destino",
+            VALID_ZONES,
+            index=1,
+            key="masivo_tgt_zone",
+        )
+
+    return (
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    )
+
+
+def render_selectores_ubicacion_masivo():
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        datum = st.selectbox(
+            "Datum",
+            VALID_DATUMS,
+            key="masivo_ub_datum",
+        )
+
+    with col2:
+
+        zone = st.selectbox(
+            "Zona",
+            VALID_ZONES,
+            index=1,
+            key="masivo_ub_zone",
+        )
+
+    return datum, zone
+
+
+# =========================================================
+# PREVIEW ORIGINAL
+# =========================================================
+
+def render_preview_original(df):
+
+    st.markdown("### Archivo original")
+
+    st.dataframe(
+        df.head(MAX_PREVIEW_ROWS),
+        use_container_width=True,
+        height=350,
+    )
+
+
+# =========================================================
+# VALIDAR CRÉDITOS
+# =========================================================
+
+def validar_creditos_masivo(df):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    filas = len(df)
+
+    creditos = int(
+        st.session_state.credits_free
+    )
+
+    if filas > creditos:
+
+        st.warning(
+            f"""
+            Necesitas {filas} créditos.
+            Créditos disponibles:
+            {creditos}
+            """
+        )
+
+        return False
+
+    return True
+
+
+# =========================================================
+# CONSUMIR CRÉDITOS MASIVO
+# =========================================================
+
+def consumir_creditos_masivo(df):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    filas = len(df)
+
+    return consumir_creditos(filas)
+
+
+# =========================================================
+# MASIVO CONVERTIR
+# =========================================================
+
+def render_masivo_convertir():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Conversión masiva
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    input_type = render_input_type_masivo(
+        "masivo_convert_tipo"
+    )
+
+    (
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    ) = render_selectores_conversion_masivo()
+
+    (
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    ) = render_configuracion_archivo()
+
+    uploaded_file = render_uploader_masivo()
+
+    if uploaded_file is None:
+        return
+
+    df_original = procesar_archivo_subido(
+        uploaded_file,
+        tiene_encabezado,
+    )
+
+    if df_original is None:
+        return
+
+    if not validar_limite_free(df_original):
+        return
+
+    render_preview_original(df_original)
+
+    mapping = obtener_mapeo_columnas(
+        df_original,
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    )
+
+    ejecutar = st.button(
+        "Convertir y previsualizar",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if not ejecutar:
+        return
+
+    if not validar_creditos_masivo(
+        df_original
+    ):
+        return
+
+    try:
+
+        with st.spinner(
+            "Procesando coordenadas..."
+        ):
+
+            df_base = construir_dataframe_base(
+                df_original=df_original,
+                mapping=mapping,
+                input_type=input_type,
+            )
+
+            resultado = ejecutar_conversion_masiva(
+                df=df_base,
+                input_type=input_type,
+                source_datum=source_datum,
+                source_zone=source_zone,
+                target_datum=target_datum,
+                target_zone=target_zone,
+            )
+
+            consumir_creditos_masivo(
+                resultado
+            )
+
+            render_alertas_proceso(
+                resultado
+            )
+
+            render_tabs_resultados(
+                resultado,
+                modo="masivo",
+            )
+
+            render_panel_exportacion(
+                resultado
+            )
+
+            registrar_log(
+                accion="MASIVO_CONVERSION",
+                nombre_archivo=uploaded_file.name,
+                puntos_ok=total_validos(
+                    resultado
+                ),
+                errores_filas=total_errores(
+                    resultado
+                ),
+            )
+
+    except Exception as e:
+
+        st.error(str(e))
+
+
+# =========================================================
+# MASIVO UBICAR
+# =========================================================
+
+def render_masivo_ubicar():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Ubicación masiva
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    input_type = render_input_type_masivo(
+        "masivo_ubicar_tipo"
+    )
+
+    if input_type == "UTM":
+
+        datum, zone = (
+            render_selectores_ubicacion_masivo()
+        )
+
+    (
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    ) = render_configuracion_archivo()
+
+    uploaded_file = render_uploader_masivo()
+
+    if uploaded_file is None:
+        return
+
+    df_original = procesar_archivo_subido(
+        uploaded_file,
+        tiene_encabezado,
+    )
+
+    if df_original is None:
+        return
+
+    if not validar_limite_free(df_original):
+        return
+
+    render_preview_original(df_original)
+
+    mapping = obtener_mapeo_columnas(
+        df_original,
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    )
+
+    ejecutar = st.button(
+        "Ubicar y previsualizar",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if not ejecutar:
+        return
+
+    if not validar_creditos_masivo(
+        df_original
+    ):
+        return
+
+    try:
+
+        with st.spinner(
+            "Ubicando puntos..."
+        ):
+
+            df_base = construir_dataframe_base(
+                df_original=df_original,
+                mapping=mapping,
+                input_type=input_type,
+            )
+
+            resultado = ejecutar_ubicacion_masiva(
+                df=df_base,
+                input_type=input_type,
+                datum=(
+                    datum
+                    if input_type == "UTM"
+                    else ""
+                ),
+                zone=(
+                    zone
+                    if input_type == "UTM"
+                    else ""
+                ),
+            )
+
+            consumir_creditos_masivo(
+                resultado
+            )
+
+            render_alertas_proceso(
+                resultado
+            )
+
+            render_tabs_resultados(
+                resultado,
+                modo="masivo",
+            )
+
+            render_panel_exportacion(
+                resultado
+            )
+
+            registrar_log(
+                accion="MASIVO_UBICACION",
+                nombre_archivo=uploaded_file.name,
+                puntos_ok=total_validos(
+                    resultado
+                ),
+                errores_filas=total_errores(
+                    resultado
+                ),
+            )
+
+    except Exception as e:
+
+        st.error(str(e))
+
+
+# =========================================================
+# PANEL MASIVO
+# =========================================================
+
+def render_masivo_panel():
+
+    tab1, tab2 = st.tabs([
+        "Convertir",
+        "Ubicar",
+    ])
+
+    with tab1:
+        render_masivo_convertir()
+
+    with tab2:
+        render_masivo_ubicar()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 10
+# Admin Panel, Dashboard y métricas
+# =========================================================
+
+
+# =========================================================
+# VALIDAR ADMIN
+# =========================================================
+
+def is_admin():
+
+    return (
+        st.session_state.plan == "ADMIN"
+    )
+
+
+# =========================================================
+# MÉTRICAS GENERALES
+# =========================================================
+
+def obtener_metricas_generales():
+
+    users = get_users_df()
+    logs = get_logs_df()
+    licencias = get_licenses_df()
+
+    total_users = (
+        0 if users.empty else len(users)
+    )
+
+    total_logs = (
+        0 if logs.empty else len(logs)
+    )
+
+    total_licencias = (
+        0 if licencias.empty else len(licencias)
+    )
+
+    licencias_usadas = 0
+
+    if not licencias.empty:
+
+        licencias_usadas = len(
+            licencias[
+                licencias["estado"]
+                .astype(str)
+                .str.upper() == "USADO"
+            ]
+        )
+
+    return {
+        "usuarios": total_users,
+        "logs": total_logs,
+        "licencias": total_licencias,
+        "licencias_usadas": licencias_usadas,
+    }
+
+
+# =========================================================
+# MÉTRICAS PLANES
+# =========================================================
+
+def obtener_metricas_planes():
+
+    users = get_users_df()
+
+    if users.empty:
+
+        return {
+            "FREE": 0,
+            "PRO": 0,
+            "ADMIN": 0,
+        }
+
+    planes = (
+        users["plan"]
+        .astype(str)
+        .value_counts()
+        .to_dict()
+    )
+
+    return {
+        "FREE": planes.get("FREE", 0),
+        "PRO": planes.get("PRO", 0),
+        "ADMIN": planes.get("ADMIN", 0),
+    }
+
+
+# =========================================================
+# MÉTRICAS ACCIONES
+# =========================================================
+
+def obtener_metricas_acciones():
+
+    logs = get_logs_df()
+
+    if logs.empty:
+        return {}
+
+    acciones = (
+        logs["accion"]
+        .astype(str)
+        .value_counts()
+        .to_dict()
+    )
+
+    return acciones
+
+
+# =========================================================
+# TOP ACCIONES
+# =========================================================
+
+def render_top_acciones():
+
+    acciones = obtener_metricas_acciones()
+
+    if not acciones:
+
+        st.info(
+            "Aún no existen registros"
+        )
+
+        return
+
+    data = pd.DataFrame({
+        "Acción": list(
+            acciones.keys()
+        ),
+        "Cantidad": list(
+            acciones.values()
+        ),
+    })
+
+    st.markdown(
+        "### Acciones más usadas"
+    )
+
+    st.dataframe(
+        data,
+        use_container_width=True,
+        height=300,
+    )
+
+
+# =========================================================
+# DASHBOARD RESUMEN
+# =========================================================
+
+def render_dashboard_cards():
+
+    metricas = (
+        obtener_metricas_generales()
+    )
+
+    planes = (
+        obtener_metricas_planes()
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+
+        st.metric(
+            "Usuarios",
+            metricas["usuarios"],
+        )
+
+    with col2:
+
+        st.metric(
+            "Logs",
+            metricas["logs"],
+        )
+
+    with col3:
+
+        st.metric(
+            "Licencias",
+            metricas["licencias"],
+        )
+
+    with col4:
+
+        st.metric(
+            "Usadas",
+            metricas["licencias_usadas"],
+        )
+
+    st.markdown("---")
+
+    col5, col6, col7 = st.columns(3)
+
+    with col5:
+
+        st.metric(
+            "FREE",
+            planes["FREE"],
+        )
+
+    with col6:
+
+        st.metric(
+            "PRO",
+            planes["PRO"],
+        )
+
+    with col7:
+
+        st.metric(
+            "ADMIN",
+            planes["ADMIN"],
+        )
+
+
+# =========================================================
+# TABLA USUARIOS
+# =========================================================
+
+def render_admin_users():
+
+    users = get_users_df()
+
+    st.markdown(
+        "### Usuarios registrados"
+    )
+
+    if users.empty:
+
+        st.info(
+            "No existen usuarios"
+        )
+
+        return
+
+    st.dataframe(
+        users,
+        use_container_width=True,
+        height=400,
+    )
+
+
+# =========================================================
+# TABLA LICENCIAS
+# =========================================================
+
+def render_admin_licenses():
+
+    licencias = get_licenses_df()
+
+    st.markdown(
+        "### Licencias"
+    )
+
+    if licencias.empty:
+
+        st.info(
+            "No existen licencias"
+        )
+
+        return
+
+    st.dataframe(
+        licencias,
+        use_container_width=True,
+        height=400,
+    )
+
+
+# =========================================================
+# TABLA LOGS
+# =========================================================
+
+def render_admin_logs():
+
+    logs = get_logs_df()
+
+    st.markdown(
+        "### Logs del sistema"
+    )
+
+    if logs.empty:
+
+        st.info(
+            "No existen logs"
+        )
+
+        return
+
+    st.dataframe(
+        logs.sort_values(
+            by="fecha",
+            ascending=False,
+        ),
+        use_container_width=True,
+        height=450,
+    )
+
+
+# =========================================================
+# CREAR LICENCIA
+# =========================================================
+
+def generar_codigo_licencia(
+    prefijo="SP"
+):
+
+    random_str = uuid.uuid4().hex[:8]
+
+    return (
+        f"{prefijo}-"
+        f"{random_str}"
+    ).upper()
+
+
+# =========================================================
+# FORM LICENCIAS
+# =========================================================
+
+def render_admin_generate_license():
+
+    st.markdown(
+        "### Crear nueva licencia"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        tipo = st.selectbox(
+            "Tipo licencia",
+            [
+                "DIARIO",
+                "SEMANAL",
+                "MENSUAL",
+                "ANUAL",
+                "ADMIN",
+            ],
+        )
+
+    with col2:
+
+        cantidad = st.number_input(
+            "Cantidad",
+            min_value=1,
+            max_value=100,
+            value=1,
+        )
+
+    generar = st.button(
+        "Generar licencias",
+        use_container_width=True,
+        type="primary",
+    )
+
+    if not generar:
+        return
+
+    licencias = get_licenses_df()
+
+    nuevas = []
+
+    for _ in range(cantidad):
+
+        codigo = generar_codigo_licencia()
+
+        nuevas.append({
+            "codigo": codigo,
+            "plan_tipo": tipo,
+            "estado": "DISPONIBLE",
+            "usado_por": "",
+            "fecha_uso": "",
+        })
+
+    nuevas_df = pd.DataFrame(
+        nuevas
+    )
+
+    licencias = pd.concat(
+        [
+            licencias,
+            nuevas_df,
+        ],
+        ignore_index=True,
+    )
+
+    update_sheet(
+        "Licencias",
+        licencias,
+    )
+
+    st.success(
+        f"""
+        {cantidad} licencias creadas
+        correctamente
+        """
+    )
+
+    st.dataframe(
+        nuevas_df,
+        use_container_width=True,
+    )
+
+
+# =========================================================
+# ADMIN PANEL
+# =========================================================
+
+def render_admin_panel():
+
+    if not is_admin():
+        return
+
+    st.markdown("---")
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Panel Administrador
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Dashboard",
+        "Usuarios",
+        "Licencias",
+        "Logs",
+    ])
+
+    with tab1:
+
+        render_dashboard_cards()
+
+        render_top_acciones()
+
+        render_admin_generate_license()
+
+    with tab2:
+
+        render_admin_users()
+
+    with tab3:
+
+        render_admin_licenses()
+
+    with tab4:
+
+        render_admin_logs()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 11
+# Home, Sidebar, Licencias y App Principal
+# =========================================================
+
+
+# =========================================================
+# HERO
+# =========================================================
+
+def render_hero():
+
+    st.markdown(
+        f"""
+        <div class='hero-box'>
+
+            <div class='hero-title'>
+                {APP_NAME}
+            </div>
+
+            <div class='hero-subtitle'>
+                Conversión, ubicación y exportación
+                profesional de coordenadas topográficas
+            </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
+def render_sidebar():
+
+    with st.sidebar:
+
+        if LOGO_PATH.exists():
+
+            st.image(
+                str(LOGO_PATH),
+                use_container_width=True,
+            )
+
+        st.markdown("---")
+
+        render_user_plan()
+
+        st.markdown("---")
+
+        render_license_box()
+
+        st.markdown("---")
+
+        render_pricing()
+
+        st.markdown("---")
+
+        render_free_info()
+
+
+# =========================================================
+# LICENCIAS
+# =========================================================
+
+def render_license_box():
+
+    st.markdown(
+        "### Activar licencia"
+    )
+
+    codigo = st.text_input(
+        "Ingresa tu código",
+        placeholder="SP-XXXXXX",
+    )
+
+    activar = st.button(
+        "Activar plan",
+        use_container_width=True,
+    )
+
+    if activar:
+
+        if not codigo:
+
+            st.warning(
+                "Ingresa un código"
+            )
+
+        else:
+
+            activar_licencia(codigo)
+
+
+# =========================================================
+# PLANES
+# =========================================================
+
+def render_pricing():
+
+    st.markdown(
+        "### Planes"
+    )
+
+    st.markdown(
+        """
+        <div class='pricing-card'>
+            <h4>🟢 Gratis</h4>
+            <p>5 créditos diarios</p>
+            <p>Manual ilimitado</p>
+            <p>Masivo hasta 20 filas</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class='pricing-card'>
+            <h4>🔵 Diario</h4>
+            <p>S/ 5</p>
+            <p>Uso ilimitado</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class='pricing-card'>
+            <h4>🟡 Semanal</h4>
+            <p>S/ 10</p>
+            <p>Uso ilimitado</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class='pricing-card'>
+            <h4>🟠 Mensual</h4>
+            <p>S/ 25</p>
+            <p>Uso ilimitado</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class='pricing-card'>
+            <h4>🔴 Anual</h4>
+            <p>S/ 250</p>
+            <p>Uso ilimitado</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# INFO FREE
+# =========================================================
+
+def render_free_info():
+
+    st.markdown(
+        "### Información FREE"
+    )
+
+    st.info(
+        f"""
+        • Manual ilimitado
+
+        • 5 créditos diarios
+
+        • Exportar consume 1 crédito
+
+        • Masivo consume créditos
+        por fila procesada
+
+        • Máximo {FREE_MAX_ROWS}
+        filas por archivo
+        """
+    )
+
+
+# =========================================================
+# HOME
+# =========================================================
+
+def render_home():
+
+    render_hero()
+
+    st.markdown("")
+
+    tab1, tab2 = st.tabs([
+        "Manual",
+        "Masivo",
+    ])
+
+    with tab1:
+
+        render_manual_form()
+
+    with tab2:
+
+        render_masivo_panel()
+
+    render_admin_panel()
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+def render_footer():
+
+    st.markdown("---")
+
+    st.markdown(
+        f"""
+        <div style='text-align:center;'>
+
+        <strong>{APP_NAME}</strong>
+
+        <br>
+
+        Plataforma profesional para
+        topografía y georreferenciación
+
+        <br><br>
+
+        © 2026 Todos los derechos reservados
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# INIT SESSION
+# =========================================================
+
+def initialize_app():
+
+    init_session_state()
+
+    load_user_session()
+
+    validar_expiracion_plan()
+
+
+# =========================================================
+# APP MAIN
+# =========================================================
+
+def main():
+
+    initialize_app()
+
+    render_sidebar()
+
+    render_home()
+
+    render_footer()
+
+
+# =========================================================
+# START
+# =========================================================
+
+if __name__ == "__main__":
+
+    main()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 12
+# Funciones faltantes críticas y correcciones finales
+# =========================================================
+
+
+# =========================================================
+# CONVERTIR COLUMNAS EXCEL
+# =========================================================
+
+def convertir_columnas_excel(df):
+
+    nuevas = []
+
+    for i in range(len(df.columns)):
+
+        nuevas.append(
+            get_excel_column_name(i)
+        )
+
+    df.columns = nuevas
+
+    return df
+
+
+# =========================================================
+# EXCEL COLUMN NAME
+# =========================================================
+
+def get_excel_column_name(n):
+
+    result = ""
+
+    while True:
+
+        n, remainder = divmod(n, 26)
+
+        result = (
+            chr(65 + remainder)
+            + result
+        )
+
+        if n == 0:
+            break
+
+        n -= 1
+
+    return result
+
+
+# =========================================================
+# LIMPIAR DATAFRAME
+# =========================================================
+
+def limpiar_dataframe(df):
+
+    if df is None:
+        return pd.DataFrame()
+
+    df = df.copy()
+
+    df.columns = [
+        str(col).strip()
+        for col in df.columns
+    ]
+
+    df = df.fillna("")
+
+    return df
+
+
+# =========================================================
+# VALIDAR DATAFRAME
+# =========================================================
+
+def validar_dataframe(df):
+
+    if df is None:
+        return False, "Archivo inválido"
+
+    if df.empty:
+        return False, "Archivo vacío"
+
+    if len(df.columns) < 2:
+
+        return (
+            False,
+            "Archivo con pocas columnas",
+        )
+
+    return True, "OK"
+
+
+# =========================================================
+# LEER TXT
+# =========================================================
+
+def leer_txt(uploaded_file):
+
+    try:
+
+        df = pd.read_csv(
+            uploaded_file,
+            sep=None,
+            engine="python",
+            encoding="utf-8",
+        )
+
+        return limpiar_dataframe(df)
+
+    except:
+
+        try:
+
+            uploaded_file.seek(0)
+
+            df = pd.read_csv(
+                uploaded_file,
+                sep=r"\s+",
+                engine="python",
+                encoding="latin1",
+            )
+
+            return limpiar_dataframe(df)
+
+        except Exception as e:
+
+            raise Exception(
+                f"TXT inválido: {e}"
+            )
+
+
+# =========================================================
+# LEER CSV
+# =========================================================
+
+def leer_csv(uploaded_file):
+
+    try:
+
+        df = pd.read_csv(
+            uploaded_file,
+            encoding="utf-8",
+        )
+
+        return limpiar_dataframe(df)
+
+    except:
+
+        try:
+
+            uploaded_file.seek(0)
+
+            df = pd.read_csv(
+                uploaded_file,
+                encoding="latin1",
+            )
+
+            return limpiar_dataframe(df)
+
+        except Exception as e:
+
+            raise Exception(
+                f"CSV inválido: {e}"
+            )
+
+
+# =========================================================
+# LEER EXCEL
+# =========================================================
+
+def leer_excel(uploaded_file):
+
+    try:
+
+        df = pd.read_excel(
+            uploaded_file,
+            engine="openpyxl",
+        )
+
+        return limpiar_dataframe(df)
+
+    except Exception as e:
+
+        raise Exception(
+            f"Excel inválido: {e}"
+        )
+
+
+# =========================================================
+# LEER ARCHIVO
+# =========================================================
+
+def leer_archivo(uploaded_file):
+
+    extension = (
+        Path(uploaded_file.name)
+        .suffix
+        .lower()
+    )
+
+    if extension == ".csv":
+
+        return leer_csv(
+            uploaded_file
+        )
+
+    elif extension in [
+        ".xlsx",
+        ".xls",
+    ]:
+
+        return leer_excel(
+            uploaded_file
+        )
+
+    elif extension == ".txt":
+
+        return leer_txt(
+            uploaded_file
+        )
+
+    else:
+
+        raise Exception(
+            "Formato no soportado"
+        )
+
+
+# =========================================================
+# DETECTAR COLUMNAS
+# =========================================================
+
+def detectar_columna(
+    columnas,
+    aliases,
+):
+
+    columnas_lower = [
+        str(col).strip().lower()
+        for col in columnas
+    ]
+
+    for alias in aliases:
+
+        alias = alias.lower()
+
+        for i, col in enumerate(columnas_lower):
+
+            if alias == col:
+                return columnas[i]
+
+    for alias in aliases:
+
+        alias = alias.lower()
+
+        for i, col in enumerate(columnas_lower):
+
+            if alias in col:
+                return columnas[i]
+
+    return None
+
+
+# =========================================================
+# MAPEADOR COLUMNAS
+# =========================================================
+
+def obtener_mapeo_columnas(
+    df,
+    tiene_encabezado=True,
+    incluir_z=False,
+    incluir_desc=False,
+):
+
+    columnas = list(df.columns)
+
+    st.markdown("## Selección de columnas")
+
+    punto_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["PUNTO"],
+    )
+
+    este_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["ESTE"],
+    )
+
+    norte_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["NORTE"],
+    )
+
+    lat_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["LAT"],
+    )
+
+    lon_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["LON"],
+    )
+
+    z_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["Z"],
+    )
+
+    desc_default = detectar_columna(
+        columnas,
+        COLUMN_ALIASES["DESCRIPCION"],
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        punto = st.selectbox(
+            "Columna PUNTO",
+            columnas,
+            index=(
+                columnas.index(punto_default)
+                if punto_default in columnas
+                else 0
+            ),
+        )
+
+        este = st.selectbox(
+            "Columna ESTE",
+            columnas,
+            index=(
+                columnas.index(este_default)
+                if este_default in columnas
+                else 0
+            ),
+        )
+
+        lat = st.selectbox(
+            "Columna LAT",
+            columnas,
+            index=(
+                columnas.index(lat_default)
+                if lat_default in columnas
+                else 0
+            ),
+        )
+
+    with col2:
+
+        norte = st.selectbox(
+            "Columna NORTE",
+            columnas,
+            index=(
+                columnas.index(norte_default)
+                if norte_default in columnas
+                else 0
+            ),
+        )
+
+        lon = st.selectbox(
+            "Columna LON",
+            columnas,
+            index=(
+                columnas.index(lon_default)
+                if lon_default in columnas
+                else 0
+            ),
+        )
+
+    z = None
+    descripcion = None
+
+    if incluir_z:
+
+        z = st.selectbox(
+            "Columna Z",
+            columnas,
+            index=(
+                columnas.index(z_default)
+                if z_default in columnas
+                else 0
+            ),
+        )
+
+    if incluir_desc:
+
+        descripcion = st.selectbox(
+            "Columna DESCRIPCIÓN",
+            columnas,
+            index=(
+                columnas.index(desc_default)
+                if desc_default in columnas
+                else 0
+            ),
+        )
+
+    return {
+        "PUNTO": punto,
+        "ESTE": este,
+        "NORTE": norte,
+        "LAT": lat,
+        "LON": lon,
+        "Z": z,
+        "DESCRIPCION": descripcion,
+    }
+
+
+# =========================================================
+# DATAFRAME BASE
+# =========================================================
+
+def construir_dataframe_base(
+    df_original,
+    mapping,
+    input_type="UTM",
+):
+
+    filas = []
+
+    for _, row in df_original.iterrows():
+
+        try:
+
+            nueva = {
+                "PUNTO": sanitizar_texto(
+                    row[
+                        mapping["PUNTO"]
+                    ]
+                ),
+                "ESTE": np.nan,
+                "NORTE": np.nan,
+                "LAT": np.nan,
+                "LON": np.nan,
+                "Z": np.nan,
+                "DESCRIPCION": "",
+                "ERROR": "",
+            }
+
+            if input_type == "UTM":
+
+                nueva["ESTE"] = limpiar_numero(
+                    row[
+                        mapping["ESTE"]
+                    ]
+                )
+
+                nueva["NORTE"] = limpiar_numero(
+                    row[
+                        mapping["NORTE"]
+                    ]
+                )
+
             else:
-                with st.status("🚀 Verificando credenciales...", expanded=True) as status:
-                    try:
-                        # 1. Lectura de base de datos
-                        df_codigos = conn.read(worksheet="Usuarios", ttl=0)
-                        
-                        # Limpieza de datos para comparación
-                        df_codigos['Codigo'] = df_codigos['Codigo'].astype(str).str.strip()
-                        cod_limpio = codigo_ingresado.strip()
-                        ahora = datetime.now()
 
-                        if cod_limpio in df_codigos['Codigo'].values:
-                            idx = df_codigos[df_codigos['Codigo'] == cod_limpio].index[0]
-                            datos_cod = df_codigos.iloc[idx]
-                            st.session_state.codigo_activo = cod_limpio
-                            
-                            # --- Caso PASE DIARIO ---
-                            if datos_cod['Tipo'] == 'DIARIO':
-                                if str(datos_cod['Usado']).upper() == 'NO':
-                                    f_exp = ahora + timedelta(days=1)
-                                    df_codigos.at[idx, 'Usado'] = 'SI'
-                                    df_codigos.at[idx, 'Fecha_Activacion'] = ahora.strftime("%Y-%m-%d %H:%M:%S")
-                                    df_codigos.at[idx, 'Fecha_Expiracion'] = f_exp.strftime("%Y-%m-%d %H:%M:%S")
-                                    df_codigos.at[idx, 'Creditos_Usados'] = 0
-                                    
-                                    conn.update(worksheet="Usuarios", data=df_codigos)
-                                    st.session_state.es_pase_diario = True
-                                    st.session_state.consultas = 0
-                                    status.update(label="✅ ¡Pase Diario Activado!", state="complete")
-                                    st.balloons()
-                                    time.sleep(2)
-                                    st.rerun()
-                                else:
-                                    f_exp_dt = pd.to_datetime(datos_cod['Fecha_Expiracion'])
-                                    if ahora < f_exp_dt:
-                                        st.session_state.es_pase_diario = True
-                                        st.session_state.consultas = int(pd.to_numeric(datos_cod['Creditos_Usados'], errors='coerce') or 0)
-                                        status.update(label="✅ Suscripción recuperada.", state="complete")
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Este código de Pase Diario ha expirado.")
-                            
-                            # --- Caso MENSUAL/ANUAL ---
-                            elif datos_cod['Tipo'] in ['MENSUAL', 'ANUAL']:
-                                st.session_state.es_pro = True
-                                status.update(label=f"✅ Plan {datos_cod['Tipo']} Activado!", state="complete")
-                                st.balloons()
-                                time.sleep(2)
-                                st.rerun()
+                nueva["LAT"] = limpiar_numero(
+                    row[
+                        mapping["LAT"]
+                    ]
+                )
 
-                        elif cod_limpio == "ADMIN-JGZ-2026":
-                            st.session_state.es_admin = True
-                            status.update(label="👑 Modo Administrador Iniciado", state="complete")
-                            st.rerun()
-                        else:
-                            st.error("❌ Código no válido o inexistente.")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
+                nueva["LON"] = limpiar_numero(
+                    row[
+                        mapping["LON"]
+                    ]
+                )
 
+            if mapping["Z"]:
+
+                nueva["Z"] = limpiar_numero(
+                    row[
+                        mapping["Z"]
+                    ]
+                )
+
+            if mapping["DESCRIPCION"]:
+
+                nueva["DESCRIPCION"] = (
+                    sanitizar_texto(
+                        row[
+                            mapping[
+                                "DESCRIPCION"
+                            ]
+                        ]
+                    )
+                )
+
+            filas.append(nueva)
+
+        except Exception as e:
+
+            filas.append({
+                "PUNTO": "",
+                "ESTE": np.nan,
+                "NORTE": np.nan,
+                "LAT": np.nan,
+                "LON": np.nan,
+                "Z": np.nan,
+                "DESCRIPCION": "",
+                "ERROR": str(e),
+            })
+
+    return pd.DataFrame(filas)
 
 
 # =========================================================
-# BLOQUE 10: VISTA DE CONTACTO
+# RESULTADO MANUAL
 # =========================================================
-elif st.session_state.menu_actual == "CONTACTO":
-    st.markdown("## 📞 Centro de Soporte Técnico")
-    
-    col_inf, col_frm = st.columns([1, 1], gap="large")
-    
-    with col_inf:
-        st.write("") # Espaciador
-        st.write("")
-        st.link_button("💬 CHATEAR POR WHATSAPP", "https://wa.me/51924886915", use_container_width=True, type="primary")
-        st.info("Atención inmediata para problemas técnicos o dudas sobre licencias.")
 
-    with col_frm:
-        with st.form("soporte_form"):
-            st.markdown("##### Enviar Ticket de Consulta")
-            u_nombre = st.text_input("Nombre completo:")
-            u_correo = st.text_input("Correo o Celular:")
-            u_msj = st.text_area("Cuéntanos tu duda o requerimiento:")
-            
-            if st.form_submit_button("ENVIAR TICKET"):
-                if u_nombre and u_msj:
-                    registrar_actividad("Consulta Soporte", f"De: {u_nombre} - {u_msj[:50]}...")
-                    st.success("✅ Tu mensaje ha sido enviado. Te responderemos a la brevedad.")
-                else:
-                    st.warning("Por favor, completa los campos básicos.")
+def render_resultado_manual(df):
+
+    if df is None:
+        return
+
+    if df.empty:
+        return
+
+    row = df.iloc[0]
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Resultado
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if row["ERROR"]:
+
+        st.error(
+            row["ERROR"]
+        )
+
+        return
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "ESTE",
+            fmt_coord(
+                row["ESTE"]
+            ),
+        )
+
+    with col2:
+
+        st.metric(
+            "NORTE",
+            fmt_coord(
+                row["NORTE"]
+            ),
+        )
+
+    with col3:
+
+        st.metric(
+            "LAT / LON",
+            (
+                f"""
+                {fmt_latlon(row['LAT'])}
+                ,
+                {fmt_latlon(row['LON'])}
+                """
+            ),
+        )
+
+    if not pd.isna(row["Z"]):
+
+        st.info(
+            f"""
+            Elevación:
+            {fmt_coord(row['Z'])}
+            """
+        )
+
+    if row["DESCRIPCION"]:
+
+        st.info(
+            f"""
+            Descripción:
+            {row['DESCRIPCION']}
+            """
+        )
 
 # =========================================================
-# BLOQUE 11: PANEL ADMINISTRATIVO (JGZ)
+# SP Topo-Convert V7 | PARTE 13
+# Mapas, previews y resultados finales
 # =========================================================
-elif st.session_state.menu_actual == "ADMIN":
-    if not st.session_state.es_admin:
-        st.error("No tienes permisos para ver esto.")
-        st.session_state.menu_actual = "CONVERTIDOR"
-        st.rerun()
 
-    st.title("🔐 Panel Maestro de Gestión")
-    st.write("Control total de **SP Topo-Convert**")
 
-    # Métricas en tiempo real
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Puntos Proc. Hoy", st.session_state.consultas)
-    m2.metric("Descargas KML", st.session_state.descargas_kml)
-    m3.metric("Versión", "1.2.5")
-    m4.metric("Estado DB", "Conectado")
+# =========================================================
+# MAPA BASE
+# =========================================================
 
-    st.divider()
-    
-    tab_logs, tab_cods = st.tabs(["📊 Historial de Logs", "🎫 Generador de Códigos"])
-    
-    with tab_logs:
-        st.subheader("Actividad Global de Usuarios")
+def crear_mapa_base():
+
+    mapa = folium.Map(
+        location=PERU_CENTER,
+        zoom_start=6,
+        control_scale=True,
+        tiles="OpenStreetMap",
+    )
+
+    folium.TileLayer(
+        "CartoDB positron"
+    ).add_to(mapa)
+
+    folium.LayerControl().add_to(mapa)
+
+    return mapa
+
+
+# =========================================================
+# POPUP HTML
+# =========================================================
+
+def generar_popup_html(row):
+
+    html = f"""
+    <div style='width:220px;'>
+
+    <h4>{row['PUNTO']}</h4>
+
+    <hr>
+
+    <b>ESTE:</b>
+    {fmt_coord(row['ESTE'])}
+
+    <br>
+
+    <b>NORTE:</b>
+    {fmt_coord(row['NORTE'])}
+
+    <br>
+
+    <b>LAT:</b>
+    {fmt_latlon(row['LAT'])}
+
+    <br>
+
+    <b>LON:</b>
+    {fmt_latlon(row['LON'])}
+
+    """
+
+    if not pd.isna(row["Z"]):
+
+        html += f"""
+        <br>
+
+        <b>Z:</b>
+        {fmt_coord(row['Z'])}
+        """
+
+    if row["DESCRIPCION"]:
+
+        html += f"""
+        <br>
+
+        <b>DESC:</b>
+        {row['DESCRIPCION']}
+        """
+
+    html += "</div>"
+
+    return html
+
+
+# =========================================================
+# AGREGAR PUNTO MAPA
+# =========================================================
+
+def agregar_punto_mapa(
+    mapa,
+    row,
+):
+
+    if pd.isna(row["LAT"]):
+        return
+
+    if pd.isna(row["LON"]):
+        return
+
+    popup = generar_popup_html(row)
+
+    tooltip = str(
+        row["PUNTO"]
+    )
+
+    folium.Marker(
+        location=[
+            row["LAT"],
+            row["LON"],
+        ],
+        popup=popup,
+        tooltip=tooltip,
+        icon=folium.Icon(
+            color="blue",
+            icon="map-marker",
+            prefix="fa",
+        ),
+    ).add_to(mapa)
+
+
+# =========================================================
+# AUTO FIT MAP
+# =========================================================
+
+def auto_fit_bounds(
+    mapa,
+    df,
+):
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+        return mapa
+
+    bounds = []
+
+    for _, row in validos.iterrows():
+
+        if pd.isna(row["LAT"]):
+            continue
+
+        if pd.isna(row["LON"]):
+            continue
+
+        bounds.append([
+            row["LAT"],
+            row["LON"],
+        ])
+
+    if bounds:
+
+        mapa.fit_bounds(bounds)
+
+    return mapa
+
+
+# =========================================================
+# MAPA MANUAL
+# =========================================================
+
+def render_mapa_manual(df):
+
+    if df is None:
+        return
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+        return
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Ubicación en mapa
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    mapa = crear_mapa_base()
+
+    for _, row in validos.iterrows():
+
+        agregar_punto_mapa(
+            mapa,
+            row,
+        )
+
+    mapa = auto_fit_bounds(
+        mapa,
+        validos,
+    )
+
+    folium_static(mapa, width=1400, height=500)
+
+
+# =========================================================
+# MAPA MASIVO
+# =========================================================
+
+def render_mapa_masivo(df):
+
+    if df is None:
+        return
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+
+        st.warning(
+            "No existen puntos válidos"
+        )
+
+        return
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Vista geográfica masiva
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    mapa = crear_mapa_base()
+
+    for _, row in validos.iterrows():
+
+        agregar_punto_mapa(
+            mapa,
+            row,
+        )
+
+    mapa = auto_fit_bounds(
+        mapa,
+        validos,
+    )
+
+    folium_static(mapa, width=1400, height=650)
+
+
+# =========================================================
+# PREVIEW RESULTADOS
+# =========================================================
+
+def render_preview_resultados(df):
+
+    if df is None:
+        return
+
+    if df.empty:
+        return
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Resultado procesado
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    preview = df.copy()
+
+    st.dataframe(
+        preview,
+        use_container_width=True,
+        height=450,
+    )
+
+
+# =========================================================
+# ALERTAS RESULTADO
+# =========================================================
+
+def render_alertas_proceso(df):
+
+    validos = total_validos(df)
+
+    errores = total_errores(df)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.success(
+            f"""
+            Procesados correctamente:
+            {validos}
+            """
+        )
+
+    with col2:
+
+        if errores > 0:
+
+            st.warning(
+                f"""
+                Filas con error:
+                {errores}
+                """
+            )
+
+        else:
+
+            st.info(
+                "Sin errores detectados"
+            )
+
+
+# =========================================================
+# TAB ERRORES
+# =========================================================
+
+def render_tab_errores(df):
+
+    errores = obtener_df_errores(df)
+
+    if errores.empty:
+
+        st.success(
+            "No existen errores"
+        )
+
+        return
+
+    st.dataframe(
+        errores,
+        use_container_width=True,
+        height=300,
+    )
+
+
+# =========================================================
+# TAB VÁLIDOS
+# =========================================================
+
+def render_tab_validos(df):
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+
+        st.warning(
+            "No existen resultados válidos"
+        )
+
+        return
+
+    st.dataframe(
+        validos,
+        use_container_width=True,
+        height=400,
+    )
+
+
+# =========================================================
+# TABS RESULTADOS
+# =========================================================
+
+def render_tabs_resultados(
+    df,
+    modo="masivo",
+):
+
+    tab1, tab2, tab3 = st.tabs([
+        "Resultados",
+        "Mapa",
+        "Errores",
+    ])
+
+    with tab1:
+
+        render_preview_resultados(df)
+
+    with tab2:
+
+        if modo == "manual":
+
+            render_mapa_manual(df)
+
+        else:
+
+            render_mapa_masivo(df)
+
+    with tab3:
+
+        render_tab_errores(df)
+
+
+# =========================================================
+# RESUMEN FINAL
+# =========================================================
+
+def render_resumen_final(df):
+
+    validos = total_validos(df)
+
+    errores = total_errores(df)
+
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.metric(
+            "Correctos",
+            validos,
+        )
+
+    with col2:
+
+        st.metric(
+            "Errores",
+            errores,
+        )
+
+
+# =========================================================
+# DESCARGA ERRORES CSV
+# =========================================================
+
+def render_descarga_errores(df):
+
+    errores = obtener_df_errores(df)
+
+    if errores.empty:
+        return
+
+    csv_bytes = errores.to_csv(
+        index=False,
+        encoding="utf-8-sig",
+    ).encode("utf-8-sig")
+
+    st.download_button(
+        label="Descargar errores CSV",
+        data=csv_bytes,
+        file_name=generar_nombre_archivo(
+            "errores",
+            "csv",
+        ),
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 14
+# Exportaciones CSV, Excel, KML y DXF
+# =========================================================
+
+
+# =========================================================
+# CSV EXPORT
+# =========================================================
+
+def exportar_csv(df):
+
+    return df.to_csv(
+        index=False,
+        encoding="utf-8-sig",
+    ).encode("utf-8-sig")
+
+
+# =========================================================
+# EXCEL EXPORT
+# =========================================================
+
+def exportar_excel(df):
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="xlsxwriter",
+    ) as writer:
+
+        df.to_excel(
+            writer,
+            sheet_name="RESULTADOS",
+            index=False,
+        )
+
+        workbook = writer.book
+        worksheet = (
+            writer.sheets["RESULTADOS"]
+        )
+
+        header_format = workbook.add_format({
+            "bold": True,
+            "bg_color": "#0F172A",
+            "font_color": "white",
+            "border": 1,
+        })
+
+        for col_num, value in enumerate(df.columns.values):
+
+            worksheet.write(
+                0,
+                col_num,
+                value,
+                header_format,
+            )
+
+            worksheet.set_column(
+                col_num,
+                col_num,
+                22,
+            )
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# =========================================================
+# KML POINT
+# =========================================================
+
+def generar_kml_point(
+    row,
+):
+
+    punto = (
+        row["PUNTO"]
+        if row["PUNTO"]
+        else "PUNTO"
+    )
+
+    descripcion = (
+        row["DESCRIPCION"]
+        if row["DESCRIPCION"]
+        else ""
+    )
+
+    return f"""
+    <Placemark>
+
+        <name>{punto}</name>
+
+        <description>
+        {descripcion}
+        </description>
+
+        <Point>
+
+            <coordinates>
+            {row['LON']},
+            {row['LAT']},
+            0
+            </coordinates>
+
+        </Point>
+
+    </Placemark>
+    """
+
+
+# =========================================================
+# EXPORTAR KML
+# =========================================================
+
+def exportar_kml(df):
+
+    validos = obtener_df_validos(df)
+
+    kml_content = """
+    <?xml version="1.0" encoding="UTF-8"?>
+
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+
+    <Document>
+    """
+
+    for _, row in validos.iterrows():
+
+        if pd.isna(row["LAT"]):
+            continue
+
+        if pd.isna(row["LON"]):
+            continue
+
+        kml_content += generar_kml_point(
+            row
+        )
+
+    kml_content += """
+    </Document>
+    </kml>
+    """
+
+    return kml_content.encode("utf-8")
+
+
+# =========================================================
+# CREAR DXF
+# =========================================================
+
+def crear_dxf_document():
+
+    doc = ezdxf.new()
+
+    msp = doc.modelspace()
+
+    return doc, msp
+
+
+# =========================================================
+# DXF POINT
+# =========================================================
+
+def agregar_punto_dxf(
+    msp,
+    row,
+):
+
+    if pd.isna(row["ESTE"]):
+        return
+
+    if pd.isna(row["NORTE"]):
+        return
+
+    x = float(row["ESTE"])
+    y = float(row["NORTE"])
+
+    punto = (
+        row["PUNTO"]
+        if row["PUNTO"]
+        else "P"
+    )
+
+    msp.add_point(
+        (
+            x,
+            y,
+        )
+    )
+
+    msp.add_text(
+        punto,
+        dxfattribs={
+            "height": 1.8,
+        },
+    ).set_placement(
+        (
+            x + 1,
+            y + 1,
+        )
+    )
+
+
+# =========================================================
+# EXPORTAR DXF
+# =========================================================
+
+def exportar_dxf(df):
+
+    validos = obtener_df_validos(df)
+
+    doc, msp = crear_dxf_document()
+
+    for _, row in validos.iterrows():
+
+        agregar_punto_dxf(
+            msp,
+            row,
+        )
+
+    output = io.BytesIO()
+
+    doc.write(output)
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# =========================================================
+# NOMBRE ARCHIVO
+# =========================================================
+
+def generar_nombre_archivo(
+    prefix="resultado",
+    extension="csv",
+):
+
+    fecha = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    return (
+        f"{prefix}_{fecha}.{extension}"
+    )
+
+
+# =========================================================
+# VALIDAR EXPORTACIÓN
+# =========================================================
+
+def validar_exportacion():
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    if st.session_state.credits_free <= 0:
+
+        st.warning(
+            """
+            No tienes créditos disponibles
+            para exportar
+            """
+        )
+
+        return False
+
+    return True
+
+
+# =========================================================
+# CONSUMIR EXPORTACIÓN
+# =========================================================
+
+def consumir_credito_exportacion():
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    return consumir_creditos(1)
+
+
+# =========================================================
+# EXPORT BUTTON
+# =========================================================
+
+def render_export_button(
+    label,
+    data,
+    file_name,
+    mime,
+    key,
+):
+
+    st.download_button(
+        label=label,
+        data=data,
+        file_name=file_name,
+        mime=mime,
+        use_container_width=True,
+        key=key,
+    )
+
+
+# =========================================================
+# PANEL EXPORTACIÓN
+# =========================================================
+
+def render_panel_exportacion(df):
+
+    if df is None:
+        return
+
+    if df.empty:
+        return
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Exportaciones
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    validos = obtener_df_validos(df)
+
+    if validos.empty:
+
+        st.warning(
+            "No existen datos válidos"
+        )
+
+        return
+
+    if not validar_exportacion():
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        csv_data = exportar_csv(
+            validos
+        )
+
+        render_export_button(
+            label="Descargar CSV",
+            data=csv_data,
+            file_name=generar_nombre_archivo(
+                "coordenadas",
+                "csv",
+            ),
+            mime="text/csv",
+            key="csv_export",
+        )
+
+        excel_data = exportar_excel(
+            validos
+        )
+
+        render_export_button(
+            label="Descargar Excel",
+            data=excel_data,
+            file_name=generar_nombre_archivo(
+                "coordenadas",
+                "xlsx",
+            ),
+            mime=(
+                "application/"
+                "vnd.openxmlformats"
+                "-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            key="excel_export",
+        )
+
+    with col2:
+
+        kml_data = exportar_kml(
+            validos
+        )
+
+        render_export_button(
+            label="Descargar KML",
+            data=kml_data,
+            file_name=generar_nombre_archivo(
+                "coordenadas",
+                "kml",
+            ),
+            mime=(
+                "application/"
+                "vnd.google-earth.kml+xml"
+            ),
+            key="kml_export",
+        )
+
+        dxf_data = exportar_dxf(
+            validos
+        )
+
+        render_export_button(
+            label="Descargar DXF",
+            data=dxf_data,
+            file_name=generar_nombre_archivo(
+                "coordenadas",
+                "dxf",
+            ),
+            mime="application/dxf",
+            key="dxf_export",
+        )
+
+    st.info(
+        """
+        Usuarios FREE:
+        cada exportación consume 1 crédito
+        """
+    )
+
+    render_descarga_errores(df)
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 15
+# Seguridad, expiraciones, créditos y estabilidad
+# =========================================================
+
+
+# =========================================================
+# FECHA ACTUAL
+# =========================================================
+
+def now_peru():
+
+    return datetime.now()
+
+
+# =========================================================
+# PARSE FECHA
+# =========================================================
+
+def parse_datetime(value):
+
+    if not value:
+        return None
+
+    try:
+
+        return datetime.strptime(
+            str(value),
+            "%Y-%m-%d %H:%M:%S",
+        )
+
+    except:
+
+        return None
+
+
+# =========================================================
+# VALIDAR EXPIRACIÓN
+# =========================================================
+
+def validar_expiracion_plan():
+
+    if st.session_state.plan in [
+        "FREE",
+        "ADMIN",
+    ]:
+        return
+
+    expiracion = parse_datetime(
+        st.session_state.fecha_expiracion
+    )
+
+    if expiracion is None:
+        return
+
+    if now_peru() <= expiracion:
+        return
+
+    users = get_users_df()
+
+    mask = (
+        users["user_id"]
+        == st.session_state.user_id
+    )
+
+    users.loc[
+        mask,
+        "plan"
+    ] = "FREE"
+
+    users.loc[
+        mask,
+        "tipo_licencia"
+    ] = "NINGUNA"
+
+    users.loc[
+        mask,
+        "fecha_activacion"
+    ] = ""
+
+    users.loc[
+        mask,
+        "fecha_expiracion"
+    ] = ""
+
+    users.loc[
+        mask,
+        "creditos_disponibles"
+    ] = FREE_DAILY_CREDITS
+
+    update_sheet(
+        "Usuarios",
+        users,
+    )
+
+    st.session_state.plan = "FREE"
+
+    st.session_state.tipo_licencia = (
+        "NINGUNA"
+    )
+
+    st.session_state.fecha_expiracion = ""
+
+    st.success(
+        """
+        Tu licencia expiró.
+        Volviste al plan FREE.
+        """
+    )
+
+
+# =========================================================
+# RESET FREE DIARIO
+# =========================================================
+
+def reset_free_daily_credits():
+
+    if st.session_state.plan != "FREE":
+        return
+
+    users = get_users_df()
+
+    if users.empty:
+        return
+
+    hoy = (
+        datetime.now()
+        .strftime("%Y-%m-%d")
+    )
+
+    ultima_fecha = str(
+        st.session_state.ultima_fecha_free
+    )
+
+    if ultima_fecha == hoy:
+        return
+
+    mask = (
+        users["user_id"]
+        == st.session_state.user_id
+    )
+
+    users.loc[
+        mask,
+        "creditos_disponibles"
+    ] = FREE_DAILY_CREDITS
+
+    users.loc[
+        mask,
+        "ultima_fecha_free"
+    ] = hoy
+
+    update_sheet(
+        "Usuarios",
+        users,
+    )
+
+    st.session_state.credits_free = (
+        FREE_DAILY_CREDITS
+    )
+
+    st.session_state.ultima_fecha_free = (
+        hoy
+    )
+
+
+# =========================================================
+# VALIDAR FREE FILAS
+# =========================================================
+
+def validar_limite_free(df):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    if len(df) <= FREE_MAX_ROWS:
+        return True
+
+    st.warning(
+        f"""
+        El plan FREE solo permite
+        hasta {FREE_MAX_ROWS} filas
+        por archivo
+        """
+    )
+
+    return False
+
+
+# =========================================================
+# VALIDAR CRÉDITOS
+# =========================================================
+
+def validar_creditos(
+    cantidad=1,
+):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    disponibles = int(
+        st.session_state.credits_free
+    )
+
+    if disponibles >= cantidad:
+        return True
+
+    st.error(
+        """
+        Créditos insuficientes
+        """
+    )
+
+    return False
+
+
+# =========================================================
+# CONSUMIR CRÉDITOS
+# =========================================================
+
+def consumir_creditos(
+    cantidad=1,
+):
+
+    if st.session_state.plan != "FREE":
+        return True
+
+    if not validar_creditos(
+        cantidad
+    ):
+        return False
+
+    users = get_users_df()
+
+    mask = (
+        users["user_id"]
+        == st.session_state.user_id
+    )
+
+    actual = int(
+        st.session_state.credits_free
+    )
+
+    nuevo = max(
+        actual - cantidad,
+        0,
+    )
+
+    users.loc[
+        mask,
+        "creditos_disponibles"
+    ] = nuevo
+
+    update_sheet(
+        "Usuarios",
+        users,
+    )
+
+    st.session_state.credits_free = (
+        nuevo
+    )
+
+    return True
+
+
+# =========================================================
+# INFO SESIÓN
+# =========================================================
+
+def render_user_plan():
+
+    plan = (
+        st.session_state.plan
+    )
+
+    creditos = (
+        st.session_state.credits_free
+    )
+
+    licencia = (
+        st.session_state.tipo_licencia
+    )
+
+    st.markdown(
+        "### Estado de cuenta"
+    )
+
+    if plan == "ADMIN":
+
+        st.success(
+            """
+            ADMINISTRADOR
+            Acceso total habilitado
+            """
+        )
+
+        return
+
+    if plan == "PRO":
+
+        st.success(
+            f"""
+            PLAN PRO
+            Licencia:
+            {licencia}
+            """
+        )
+
+        if st.session_state.fecha_expiracion:
+
+            st.info(
+                f"""
+                Expira:
+                {st.session_state.fecha_expiracion}
+                """
+            )
+
+        return
+
+    st.warning(
+        f"""
+        PLAN FREE
+
+        Créditos:
+        {creditos}
+        """
+    )
+
+
+# =========================================================
+# TIEMPO EJECUCIÓN
+# =========================================================
+
+def start_timer():
+
+    st.session_state.process_start = (
+        time.time()
+    )
+
+
+def end_timer():
+
+    if (
+        "process_start"
+        not in st.session_state
+    ):
+        return 0
+
+    return round(
+        time.time()
+        - st.session_state.process_start,
+        2,
+    )
+
+
+# =========================================================
+# LOG DETALLADO
+# =========================================================
+
+def registrar_log_detallado(
+    accion="",
+    nombre_archivo="",
+    puntos_ok=0,
+    errores_filas=0,
+):
+
+    tiempo = end_timer()
+
+    registrar_log(
+        accion=accion,
+        nombre_archivo=nombre_archivo,
+        puntos_ok=puntos_ok,
+        errores_filas=errores_filas,
+        tiempo_ejecucion=tiempo,
+    )
+
+
+# =========================================================
+# ERROR UI
+# =========================================================
+
+def render_error_box(
+    mensaje,
+):
+
+    st.markdown(
+        f"""
+        <div class='error-box'>
+        {mensaje}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# SUCCESS UI
+# =========================================================
+
+def render_success_box(
+    mensaje,
+):
+
+    st.markdown(
+        f"""
+        <div class='success-box'>
+        {mensaje}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# LOADING UI
+# =========================================================
+
+@contextmanager
+def process_loading(
+    mensaje="Procesando..."
+):
+
+    with st.spinner(mensaje):
+
+        start_timer()
+
+        yield
+
+
+# =========================================================
+# PROTEGER APP
+# =========================================================
+
+def protect_app():
+
+    reset_free_daily_credits()
+
+    validar_expiracion_plan()
+
+
+# =========================================================
+# REEMPLAZAR initialize_app
+# =========================================================
+
+def initialize_app():
+
+    init_session_state()
+
+    load_user_session()
+
+    protect_app()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 16
+# Mejoras UX, plantillas, helpers y estabilidad visual
+# =========================================================
+
+
+# =========================================================
+# HELP CARD
+# =========================================================
+
+def render_help_card():
+
+    st.markdown(
+        """
+        <div class='help-card'>
+
+        <h3>¿Cómo usar la plataforma?</h3>
+
+        <ul>
+
+        <li>
+        Manual:
+        convierte o ubica un punto rápidamente
+        </li>
+
+        <li>
+        Masivo:
+        procesa múltiples puntos desde
+        Excel o CSV
+        </li>
+
+        <li>
+        Exporta resultados en:
+        CSV, Excel, KML o DXF
+        </li>
+
+        <li>
+        Visualiza tus puntos directamente
+        en el mapa
+        </li>
+
+        </ul>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# PLANTILLA UTM
+# =========================================================
+
+def generar_template_utm():
+
+    df = pd.DataFrame({
+        "PUNTO": [
+            "P1",
+            "P2",
+            "P3",
+        ],
+        "ESTE": [
+            500000,
+            500120,
+            500250,
+        ],
+        "NORTE": [
+            8500000,
+            8500150,
+            8500320,
+        ],
+        "Z": [
+            120,
+            122,
+            125,
+        ],
+        "DESCRIPCION": [
+            "PUNTO A",
+            "PUNTO B",
+            "PUNTO C",
+        ],
+    })
+
+    return df
+
+
+# =========================================================
+# PLANTILLA GEO
+# =========================================================
+
+def generar_template_geo():
+
+    df = pd.DataFrame({
+        "PUNTO": [
+            "P1",
+            "P2",
+            "P3",
+        ],
+        "LAT": [
+            -12.046374,
+            -12.046800,
+            -12.047200,
+        ],
+        "LON": [
+            -77.042793,
+            -77.043200,
+            -77.044000,
+        ],
+        "Z": [
+            120,
+            121,
+            124,
+        ],
+        "DESCRIPCION": [
+            "PUNTO A",
+            "PUNTO B",
+            "PUNTO C",
+        ],
+    })
+
+    return df
+
+
+# =========================================================
+# DESCARGAR TEMPLATE
+# =========================================================
+
+def render_templates_download():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Plantillas de ejemplo
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        utm_excel = exportar_excel(
+            generar_template_utm()
+        )
+
+        st.download_button(
+            label="Plantilla UTM",
+            data=utm_excel,
+            file_name="template_utm.xlsx",
+            mime=(
+                "application/"
+                "vnd.openxmlformats"
+                "-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
+    with col2:
+
+        geo_excel = exportar_excel(
+            generar_template_geo()
+        )
+
+        st.download_button(
+            label="Plantilla LAT/LON",
+            data=geo_excel,
+            file_name="template_geo.xlsx",
+            mime=(
+                "application/"
+                "vnd.openxmlformats"
+                "-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
+
+# =========================================================
+# ESTADÍSTICAS RÁPIDAS
+# =========================================================
+
+def render_stats_quick(df):
+
+    if df is None:
+        return
+
+    validos = total_validos(df)
+
+    errores = total_errores(df)
+
+    total = len(df)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Total",
+            total,
+        )
+
+    with col2:
+
+        st.metric(
+            "Correctos",
+            validos,
+        )
+
+    with col3:
+
+        st.metric(
+            "Errores",
+            errores,
+        )
+
+
+# =========================================================
+# MAPA SATELITAL
+# =========================================================
+
+def agregar_capa_satelital(
+    mapa,
+):
+
+    folium.TileLayer(
+        tiles=(
+            "https://server.arcgisonline.com/"
+            "ArcGIS/rest/services/"
+            "World_Imagery/MapServer/"
+            "tile/{z}/{y}/{x}"
+        ),
+        attr="Esri",
+        name="Satélite",
+        overlay=False,
+        control=True,
+    ).add_to(mapa)
+
+    return mapa
+
+
+# =========================================================
+# REEMPLAZAR CREAR MAPA
+# =========================================================
+
+def crear_mapa_base():
+
+    mapa = folium.Map(
+        location=PERU_CENTER,
+        zoom_start=6,
+        control_scale=True,
+        tiles="OpenStreetMap",
+    )
+
+    folium.TileLayer(
+        "CartoDB positron",
+        name="Claro",
+    ).add_to(mapa)
+
+    agregar_capa_satelital(
+        mapa
+    )
+
+    folium.LayerControl(
+        collapsed=False
+    ).add_to(mapa)
+
+    return mapa
+
+
+# =========================================================
+# BADGE PLAN
+# =========================================================
+
+def render_plan_badge():
+
+    plan = (
+        st.session_state.plan
+    )
+
+    if plan == "ADMIN":
+
+        color = "#dc2626"
+
+    elif plan == "PRO":
+
+        color = "#2563eb"
+
+    else:
+
+        color = "#f59e0b"
+
+    st.markdown(
+        f"""
+        <div style='
+            background:{color};
+            color:white;
+            padding:10px;
+            border-radius:12px;
+            text-align:center;
+            font-weight:700;
+            margin-bottom:15px;
+        '>
+
+        PLAN {plan}
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# REEMPLAZAR SIDEBAR
+# =========================================================
+
+def render_sidebar():
+
+    with st.sidebar:
+
+        logo = cargar_logo()
+        if logo is not None:
+            st.image(logo, use_container_width=True)
+
+        render_plan_badge()
+
+        render_user_plan()
+
+        st.markdown("---")
+
+        render_license_box()
+
+        st.markdown("---")
+
+        render_templates_download()
+
+        st.markdown("---")
+
+        render_pricing()
+
+        st.markdown("---")
+
+        render_free_info()
+
+        st.markdown("---")
+
+        render_help_card()
+
+
+# =========================================================
+# EMPTY RESULT
+# =========================================================
+
+def render_empty_result():
+
+    st.info(
+        """
+        Aquí aparecerán los resultados
+        procesados
+        """
+    )
+
+
+# =========================================================
+# REEMPLAZAR HOME
+# =========================================================
+
+def render_home():
+
+    render_hero()
+
+    st.markdown("")
+
+    tab1, tab2 = st.tabs([
+        "Manual",
+        "Masivo",
+    ])
+
+    with tab1:
+
+        render_manual_form()
+
+    with tab2:
+
+        render_masivo_panel()
+
+    render_admin_panel()
+
+    render_footer()
+
+
+# =========================================================
+# WARNING LICENSE
+# =========================================================
+
+def render_license_warning():
+
+    if st.session_state.plan != "FREE":
+        return
+
+    creditos = int(
+        st.session_state.credits_free
+    )
+
+    if creditos > 1:
+        return
+
+    st.warning(
+        """
+        Te queda 1 crédito disponible.
+        Activa un plan PRO para
+        uso ilimitado.
+        """
+    )
+
+
+# =========================================================
+# REEMPLAZAR MAIN
+# =========================================================
+
+def main():
+
+    initialize_app()
+
+    render_sidebar()
+
+    render_license_warning()
+
+    render_home()
+
+# =========================================================
+# SP Topo-Convert V7 | PARTE 17
+# Correcciones integrales y mejoras de estabilidad
+# =========================================================
+
+
+# =========================================================
+# REEMPLAZAR EXPORT BUTTON
+# =========================================================
+
+def render_export_button(
+    label,
+    data,
+    file_name,
+    mime,
+    key,
+):
+
+    clicked = st.download_button(
+        label=label,
+        data=data,
+        file_name=file_name,
+        mime=mime,
+        use_container_width=True,
+        key=key,
+    )
+
+    if clicked:
+
+        consumir_credito_exportacion()
+
+        registrar_log_detallado(
+            accion=f"EXPORT_{file_name}",
+        )
+
+
+# =========================================================
+# VALIDAR COLUMNAS UTM
+# =========================================================
+
+def validar_columnas_utm(mapping):
+
+    if not mapping["ESTE"]:
+
+        st.error(
+            "Debes seleccionar ESTE"
+        )
+
+        return False
+
+    if not mapping["NORTE"]:
+
+        st.error(
+            "Debes seleccionar NORTE"
+        )
+
+        return False
+
+    return True
+
+
+# =========================================================
+# VALIDAR COLUMNAS GEO
+# =========================================================
+
+def validar_columnas_geo(mapping):
+
+    if not mapping["LAT"]:
+
+        st.error(
+            "Debes seleccionar LAT"
+        )
+
+        return False
+
+    if not mapping["LON"]:
+
+        st.error(
+            "Debes seleccionar LON"
+        )
+
+        return False
+
+    return True
+
+
+# =========================================================
+# VALIDAR MAPPING
+# =========================================================
+
+def validar_mapping(
+    mapping,
+    input_type="UTM",
+):
+
+    if not mapping["PUNTO"]:
+
+        st.error(
+            "Debes seleccionar PUNTO"
+        )
+
+        return False
+
+    if input_type == "UTM":
+
+        return validar_columnas_utm(
+            mapping
+        )
+
+    return validar_columnas_geo(
+        mapping
+    )
+
+
+# =========================================================
+# VALIDAR FILA UTM
+# =========================================================
+
+def validar_fila_utm(
+    este,
+    norte,
+):
+
+    if pd.isna(este):
+        return False
+
+    if pd.isna(norte):
+        return False
+
+    if este <= 0:
+        return False
+
+    if norte <= 0:
+        return False
+
+    return True
+
+
+# =========================================================
+# VALIDAR FILA GEO
+# =========================================================
+
+def validar_fila_geo(
+    lat,
+    lon,
+):
+
+    if pd.isna(lat):
+        return False
+
+    if pd.isna(lon):
+        return False
+
+    if lat < -90 or lat > 90:
+        return False
+
+    if lon < -180 or lon > 180:
+        return False
+
+    return True
+
+
+# =========================================================
+# REEMPLAZAR CONSTRUIR BASE
+# =========================================================
+
+def construir_dataframe_base(
+    df_original,
+    mapping,
+    input_type="UTM",
+):
+
+    filas = []
+
+    for _, row in df_original.iterrows():
+
         try:
-            df_logs = conn.read(worksheet="Logs", ttl=0)
-            # Mostramos los últimos logs primero
-            st.dataframe(df_logs.sort_index(ascending=False), use_container_width=True)
-            
-            if st.button("🔄 Refrescar Historial"):
-                st.rerun()
-        except:
-            st.error("No se pudo cargar la hoja de Logs.")
 
-    with tab_cods:
-        st.subheader("Gestión de Licencias")
-        st.write("Aquí puedes visualizar los códigos activos en la base de datos.")
-        try:
-            df_c = conn.read(worksheet="Usuarios", ttl=0)
-            st.table(df_c)
-        except:
-            st.info("Configura una hoja llamada 'Codigos' en tu GSheets para gestionar ventas.")
+            nueva = {
+                "PUNTO": "",
+                "ESTE": np.nan,
+                "NORTE": np.nan,
+                "LAT": np.nan,
+                "LON": np.nan,
+                "Z": np.nan,
+                "DESCRIPCION": "",
+                "ERROR": "",
+            }
 
-    if st.button("🚪 CERRAR SESIÓN ADMIN"):
-        st.session_state.es_admin = False
-        st.session_state.menu_actual = "CONVERTIDOR"
-        st.rerun()
+            nueva["PUNTO"] = (
+                sanitizar_texto(
+                    row[
+                        mapping["PUNTO"]
+                    ]
+                )
+            )
+
+            if input_type == "UTM":
+
+                nueva["ESTE"] = (
+                    limpiar_numero(
+                        row[
+                            mapping["ESTE"]
+                        ]
+                    )
+                )
+
+                nueva["NORTE"] = (
+                    limpiar_numero(
+                        row[
+                            mapping["NORTE"]
+                        ]
+                    )
+                )
+
+                if not validar_fila_utm(
+                    nueva["ESTE"],
+                    nueva["NORTE"],
+                ):
+
+                    nueva["ERROR"] = (
+                        "UTM inválido"
+                    )
+
+            else:
+
+                nueva["LAT"] = (
+                    limpiar_numero(
+                        row[
+                            mapping["LAT"]
+                        ]
+                    )
+                )
+
+                nueva["LON"] = (
+                    limpiar_numero(
+                        row[
+                            mapping["LON"]
+                        ]
+                    )
+                )
+
+                if not validar_fila_geo(
+                    nueva["LAT"],
+                    nueva["LON"],
+                ):
+
+                    nueva["ERROR"] = (
+                        "LAT/LON inválido"
+                    )
+
+            if mapping["Z"]:
+
+                nueva["Z"] = (
+                    limpiar_numero(
+                        row[
+                            mapping["Z"]
+                        ]
+                    )
+                )
+
+            if mapping["DESCRIPCION"]:
+
+                nueva["DESCRIPCION"] = (
+                    sanitizar_texto(
+                        row[
+                            mapping[
+                                "DESCRIPCION"
+                            ]
+                        ]
+                    )
+                )
+
+            filas.append(nueva)
+
+        except Exception as e:
+
+            filas.append({
+                "PUNTO": "",
+                "ESTE": np.nan,
+                "NORTE": np.nan,
+                "LAT": np.nan,
+                "LON": np.nan,
+                "Z": np.nan,
+                "DESCRIPCION": "",
+                "ERROR": str(e),
+            })
+
+    return pd.DataFrame(filas)
+
+
+# =========================================================
+# REEMPLAZAR MASIVO CONVERTIR
+# =========================================================
+
+def render_masivo_convertir():
+
+    st.markdown(
+        """
+        <div class='section-title'>
+        Conversión masiva
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    input_type = render_input_type_masivo(
+        "masivo_convert_tipo"
+    )
+
+    (
+        source_datum,
+        source_zone,
+        target_datum,
+        target_zone,
+    ) = render_selectores_conversion_masivo()
+
+    (
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    ) = render_configuracion_archivo()
+
+    uploaded_file = render_uploader_masivo()
+
+    if uploaded_file is None:
+        return
+
+    df_original = procesar_archivo_subido(
+        uploaded_file,
+        tiene_encabezado,
+    )
+
+    if df_original is None:
+        return
+
+    if not validar_limite_free(
+        df_original
+    ):
+        return
+
+    render_preview_original(
+        df_original
+    )
+
+    mapping = obtener_mapeo_columnas(
+        df_original,
+        tiene_encabezado,
+        incluir_z,
+        incluir_desc,
+    )
+
+    if not validar_mapping(
+        mapping,
+        input_type,
+    ):
+        return
+
+    ejecutar = st.button(
+        "Convertir y previsualizar",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if not ejecutar:
+        return
+
+    if not validar_creditos_masivo(
+        df_original
+    ):
+        return
+
+    try:
+
+        with process_loading(
+            "Convirtiendo coordenadas..."
+        ):
+
+            df_base = construir_dataframe_base(
+                df_original=df_original,
+                mapping=mapping,
+                input_type=input_type,
+            )
+
+            resultado = ejecutar_conversion_masiva(
+                df=df_base,
+                input_type=input_type,
+                source_datum=source_datum,
+                source_zone=source_zone,
+                target_datum=target_datum,
+                target_zone=target_zone,
+            )
+
+            consumir_creditos_masivo(
+                resultado
+            )
+
+            render_stats_quick(
+                resultado
+            )
+
+            render_alertas_proceso(
+                resultado
+            )
+
+            render_tabs_resultados(
+                resultado,
+                modo="masivo",
+            )
+
+            render_panel_exportacion(
+                resultado
+            )
+
+            registrar_log_detallado(
+                accion="MASIVO_CONVERSION",
+                nombre_archivo=uploaded_file.name,
+                puntos_ok=total_validos(
+                    resultado
+                ),
+                errores_filas=total_errores(
+                    resultado
+                ),
+            )
+
+    except Exception as e:
+
+        render_error_box(
+            str(e)
+        )
