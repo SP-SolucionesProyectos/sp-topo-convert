@@ -401,22 +401,22 @@ render_logo_sidebar()
 
 @st.cache_resource
 def connect_gsheet():
-    try:
-        st.write("INICIANDO CONEXION GOOGLE SHEETS")
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ],
-        )
-        st.success("CREDENTIALS OK")
-        client = gspread.authorize(creds)
-        st.success("GOOGLE AUTH OK")
-        spreadsheet = client.open_by_key(st.secrets["SHEET_ID"])
-        st.success("SHEET ABIERTO OK")
-    except Exception as e:
-        st.error(f"Error Google Sheets: {e}")
+
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open_by_key(
+        st.secrets["SHEET_ID"]
+    )
+
+    return spreadsheet
 
 
 def load_sheet(sheet_name):
