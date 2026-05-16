@@ -46,6 +46,9 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    [data-testid="stSidebar"] {
+        background-color: #0E1117;
+    }
     .stApp {
         background: #F5F7FA;
     }
@@ -3741,7 +3744,7 @@ def render_configuracion_archivo(prefix="masivo"):
         tiene_encabezado = st.checkbox(
             "El archivo tiene encabezado",
             value=True,
-            key=f"{prefix}_tiene_encabezado",
+            key="masivo_tiene_encabezado"
         )
 
     with col2:
