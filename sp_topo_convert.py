@@ -49,8 +49,12 @@ st.markdown(
     .stApp {
         background: #F5F7FA;
     }
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0A3D62 0%, #082C47 100%);
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0B1F3A 0%, #123C73 100%);
+    }
+
+    section[data-testid="stSidebar"] * {
+        color: white !important;
     }
     h1, h2, h3, h4, h5, h6 {
         color: #0A3D62;
@@ -2828,99 +2832,12 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-@st.cache_resource
-
-def connect_gsheet():
-
-    try:
-
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=SCOPES,
-        )
-
-        client = gspread.authorize(
-            creds
-        )
-
-        spreadsheet = client.open_by_key(
-            SHEET_ID
-        )
-
-        return spreadsheet
-
-    except Exception as e:
-
-        st.error(
-            f"""
-            Error Google Sheets:
-            {e}
-            """
-        )
-
-        return None
-
-# =========================================================
-# LEER HOJA
-# =========================================================
-
 def read_sheet(sheet_name):
+    return load_sheet(sheet_name)
 
-    try:
-
-        conn = connect_gsheet()
-
-        if conn is None:
-            return pd.DataFrame()
-
-        df = conn.read(
-            worksheet=sheet_name,
-            ttl=0,
-        )
-
-        if df is None:
-            return pd.DataFrame()
-
-        return df
-
-    except Exception as e:
-
-        st.error(
-            f"Error leyendo hoja {sheet_name}"
-        )
-
-        return pd.DataFrame()
-
-
-# =========================================================
-# ESCRIBIR HOJA
-# =========================================================
 
 def update_sheet(sheet_name, df):
-
-    try:
-
-        conn = connect_gsheet()
-
-        if conn is None:
-            return False
-
-        conn.update(
-            worksheet=sheet_name,
-            data=df,
-        )
-
-        return True
-
-    except Exception as e:
-
-        st.error(
-            f"Error actualizando hoja {sheet_name}"
-        )
-
-        return False
-
-
+    return save_sheet(sheet_name, df)
 # =========================================================
 # OBTENER USUARIOS
 # =========================================================
@@ -3741,6 +3658,7 @@ def render_manual_ubicar():
     if input_type == "UTM":
 
         data = render_inputs_utm_manual("manual_ubicar")
+    else:
         data = render_inputs_geo_manual("manual_ubicar")
 
     ejecutar = st.button(
