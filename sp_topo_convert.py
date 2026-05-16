@@ -3538,24 +3538,19 @@ def render_selectores_ubicacion(key="manual"):
 # =========================================================
 
 def render_inputs_utm_manual(prefix):
-    col1, col2 = st.columns(2)
-
+    # Crear columnas para que los campos queden alineados uno al lado del otro
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        punto = st.text_input("PUNTO", placeholder="P1", key=f"{prefix}_punto")
-        este = st.text_input("ESTE", placeholder="500000", key=f"{prefix}_este")
-        z = st.text_input("Z / Elevación", placeholder="Opcional", key=f"{prefix}_z")
-
+        este = st.number_input("ESTE", format="%.3f", key=f"{prefix}_este")
     with col2:
-        norte = st.text_input("NORTE", placeholder="8500000", key=f"{prefix}_norte")
-        descripcion = st.text_input("Descripción", placeholder="Opcional", key=f"{prefix}_desc")
-
-    return {
-        "PUNTO": punto,
-        "ESTE": este,
-        "NORTE": norte,
-        "Z": z,
-        "DESCRIPCION": descripcion,
-    }
+        norte = st.number_input("NORTE", format="%.3f", key=f"{prefix}_norte")
+    with col3:
+        elevacion = st.number_input("Z / Elevación", format="%.3f", key=f"{prefix}_z")
+        
+    descripcion = st.text_input("Descripción", key=f"{prefix}_desc")
+    
+    return {"ESTE": este, "NORTE": norte, "Z": elevacion, "DESCRIPCION": descripcion}
 
 
 def render_inputs_geo_manual(prefix):
@@ -3660,6 +3655,7 @@ def render_manual_convertir():
     if input_type == "UTM":
 
         data = render_inputs_utm_manual("manual_convert")
+    else:
         data = render_inputs_geo_manual("manual_convert")
 
     ejecutar = st.button(
