@@ -3734,10 +3734,11 @@ def render_manual_ubicar():
 # =========================================================
 
 def render_configuracion_archivo(prefix="masivo"):
+
     st.markdown(
         """
         <div class='section-title'>
-        Configuración del archivo
+            Configuración del archivo
         </div>
         """,
         unsafe_allow_html=True,
@@ -3746,12 +3747,15 @@ def render_configuracion_archivo(prefix="masivo"):
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        "El archivo tiene encabezado",
-        value=True,
-        key="check_encabezado_masivo"
-    )
+
+        tiene_encabezado = st.checkbox(
+            "El archivo tiene encabezado",
+            value=True,
+            key=f"{prefix}_check_encabezado",
+        )
 
     with col2:
+
         incluir_z = st.checkbox(
             "Contiene elevación (Z)",
             value=False,
@@ -3759,6 +3763,7 @@ def render_configuracion_archivo(prefix="masivo"):
         )
 
     with col3:
+
         incluir_desc = st.checkbox(
             "Contiene descripción",
             value=False,
