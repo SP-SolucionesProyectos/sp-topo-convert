@@ -3,7 +3,6 @@ pandas
 pyproj
 folium
 streamlit-folium
-streamlit-gsheets
 ezdxf
 gspread
 google-auth
