@@ -402,16 +402,21 @@ render_logo_sidebar()
 @st.cache_resource
 def connect_gsheet():
     try:
+        st.write("INICIANDO CONEXION GOOGLE SHEETS")
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
-            scopes=SCOPES,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ],
         )
+        st.success("CREDENTIALS OK")
         client = gspread.authorize(creds)
-        spreadsheet = client.open_by_key(SHEET_ID)
-        return spreadsheet
+        st.success("GOOGLE AUTH OK")
+        spreadsheet = client.open_by_key(st.secrets["SHEET_ID"])
+        st.success("SHEET ABIERTO OK")
     except Exception as e:
         st.error(f"Error Google Sheets: {e}")
-        return None
 
 
 def load_sheet(sheet_name):
@@ -3741,11 +3746,10 @@ def render_configuracion_archivo(prefix="masivo"):
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        tiene_encabezado = st.checkbox(
-            "El archivo tiene encabezado",
-            value=True,
-            key="masivo_tiene_encabezado"
-        )
+        "El archivo tiene encabezado",
+        value=True,
+        key="check_encabezado_masivo"
+    )
 
     with col2:
         incluir_z = st.checkbox(
